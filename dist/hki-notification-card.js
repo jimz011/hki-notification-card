@@ -1,5 +1,5 @@
 /* HKI Notification Card
- * Version: 18.3.1 (Per-Notification Confirmation Override)
+ * Version: 18.4.0 (Integration Sync & Per-Notification Styling)
  */
 
 const _getLit = () => {
@@ -58,7 +58,8 @@ class HkiNotificationCard extends LitElement {
       display_mode: "ticker",
       show_icon: true,
       interval: 3,
-      auto_cycle: true
+      auto_cycle: true,
+      use_header_styling: false
     };
   }
 
@@ -122,7 +123,7 @@ class HkiNotificationCard extends LitElement {
       direction: "right",
       alignment: "left",
       full_width: false,
-      // Header card integration
+      // Header card integration - Disabled by default
       use_header_styling: false,
       // Appearance
       show_icon: true,
@@ -177,8 +178,6 @@ class HkiNotificationCard extends LitElement {
     this._resizeObserver = new ResizeObserver(() => {
         this._detectBadgeSlot();
         if (this._config.display_mode === 'marquee') {
-            // When using CSS animation (badge slot or nested in parent card),
-            // only check overflow, don't reset the entire ticker
             if (this._isInBadgeSlot) {
                 this._checkMarqueeOverflow();
             } else {
@@ -190,8 +189,6 @@ class HkiNotificationCard extends LitElement {
     this._resizeObserver.observe(this);
     this._resetTicker();
     
-    // Delayed initial overflow check for when card is dynamically created
-    // (ensures DOM is fully rendered with dimensions before checking)
     if (this._config?.display_mode === 'marquee') {
         setTimeout(() => this._checkMarqueeOverflow(), 100);
         setTimeout(() => this._checkMarqueeOverflow(), 500);
@@ -215,7 +212,6 @@ class HkiNotificationCard extends LitElement {
       const className = element.className || '';
       const slot = element.getAttribute?.('slot') || '';
       
-      // Check specifically for header card
       if (tagName === 'hki-header-card') {
         this._isInBadgeSlot = true;
         this._isInHeaderCard = true;
@@ -247,7 +243,6 @@ class HkiNotificationCard extends LitElement {
     if (this._resizeObserver) this._resizeObserver.disconnect();
     window.removeEventListener("mousemove", this._boundMouseMove);
     window.removeEventListener("mouseup", this._boundMouseUp);
-    // Clean up popup portal if open
     this._removePopupPortal();
   }
 
@@ -353,13 +348,11 @@ class HkiNotificationCard extends LitElement {
     if (content) {
         content.classList.add('paused');
         
-        // For CSS animation mode, capture current animated position
         if (this._isInBadgeSlot && this._config.display_mode === 'marquee') {
             const computedStyle = window.getComputedStyle(content);
             const matrix = new DOMMatrix(computedStyle.transform);
-            this._cssScrollOffset = matrix.m41; // translateX value
+            this._cssScrollOffset = matrix.m41; 
             this._cssDragOffset = this._cssScrollOffset;
-            // Remove animation and set current position as static transform
             content.style.animation = 'none';
             content.style.transform = `translateX(${this._cssScrollOffset}px)`;
         }
@@ -379,17 +372,14 @@ class HkiNotificationCard extends LitElement {
         this._wasDragged = true;
         if (this._config.display_mode === "marquee") {
             if (this._isInBadgeSlot) {
-                // For CSS animation mode, use transform-based dragging
                 const content = this.shadowRoot?.querySelector('.marquee-content');
                 if (content) {
                     const deltaX = x - this._dragStart.x;
-                    // Get current scroll position from CSS variable or start fresh
                     const currentOffset = this._cssScrollOffset || 0;
                     this._cssDragOffset = currentOffset + deltaX;
                     content.style.transform = `translateX(${this._cssDragOffset}px)`;
                 }
             } else {
-                // For JS-based scrolling, use scrollLeft
                 const container = this.shadowRoot?.querySelector('.marquee-container');
                 if (container) {
                     const deltaX = x - this._dragStart.x;
@@ -411,16 +401,12 @@ class HkiNotificationCard extends LitElement {
 
     if (this._config.display_mode === "marquee") {
         if (this._isInBadgeSlot) {
-            // For CSS animation mode, resume animation after delay
             const content = this.shadowRoot?.querySelector('.marquee-content');
             if (content) {
-                // Store the final drag position
                 this._cssScrollOffset = this._cssDragOffset || 0;
-                
                 this._marqueeResumeTimer = setTimeout(() => { 
                     this._isPaused = false;
                     if (content) {
-                        // Reset transform and restart CSS animation
                         content.style.transform = '';
                         content.style.animation = '';
                         content.classList.remove('paused');
@@ -432,7 +418,6 @@ class HkiNotificationCard extends LitElement {
             return;
         }
         
-        // For JS-based scrolling
         const container = this.shadowRoot?.querySelector('.marquee-container');
         if (container) this._scrollPos = container.scrollLeft;
         
@@ -461,19 +446,13 @@ class HkiNotificationCard extends LitElement {
   _handleClick(msg, e) {
     if (this._wasDragged) { this._wasDragged = false; return; }
     
-    // If tap_action_popup_only is enabled, always open popup (ignore service call tap_actions)
     if (this._config.tap_action_popup_only && this._config.popup_enabled !== false && msg._real !== false) {
       this._openPopup();
       return;
     }
     
-    // If message has custom tap_action
     if (msg.tap_action) {
-      // Check if confirmation is needed:
-      // 1. Per-notification 'confirm' overrides card setting
-      // 2. Fall back to card's global confirm_tap_action
       const needsConfirm = msg.confirm !== undefined ? msg.confirm : this._config.confirm_tap_action;
-      
       if (needsConfirm) {
         this._confirmationPending = msg;
         return;
@@ -482,17 +461,14 @@ class HkiNotificationCard extends LitElement {
       return;
     }
     
-    // Default action: open popup (if enabled and not a fake message)
     if (this._config.popup_enabled !== false && msg._real !== false) {
       this._openPopup();
     }
   }
 
-  // --- UPDATED TAP ACTION LOGIC ---
   _executeTapAction(action) {
     if (!action) return;
 
-    // 1. Navigation
     if (action.action === "navigate" && action.navigation_path) {
       history.pushState(null, "", action.navigation_path);
       const event = new Event("location-changed", { bubbles: true, composed: true });
@@ -500,43 +476,34 @@ class HkiNotificationCard extends LitElement {
       return;
     } 
     
-    // 2. URL
     if (action.action === "url" && action.url_path) {
       window.open(action.url_path, "_blank");
       return;
     }
     
-    // 3. Popup
     if (action.action === "popup") {
       this._openPopup();
       return;
     }
 
-    // 4. Service Call (Universal Handler)
-    // Detects 'call-service', 'perform-action', or just a service string 'domain.service'
     let serviceName = null;
     
     if (action.service) {
       serviceName = action.service;
     } else if (typeof action.action === "string" && action.action.includes(".")) {
-      // Handle modern 'action: light.toggle'
       serviceName = action.action;
     } else if (action.action === "call-service" || action.action === "perform-action") {
-      // Fallback if 'service' wasn't set but type is declared
-      // We assume data might contain the service if it was malformed, but usually 'service' is required here.
       if (action.service) serviceName = action.service;
     }
 
     if (serviceName) {
       const [domain, service] = serviceName.split(".");
       if (domain && service) {
-        // Merge all possible data locations (legacy 'data', modern 'target', 'service_data')
         const serviceData = { 
           ...(action.data || {}), 
           ...(action.service_data || {}), 
           ...(action.target || {}) 
         };
-        
         this.hass.callService(domain, service, serviceData);
       }
     }
@@ -568,7 +535,6 @@ class HkiNotificationCard extends LitElement {
     const count = realMessages.length;
     const c = this._config;
     
-    // Create portal container
     const portal = document.createElement('div');
     portal.className = 'hki-notification-popup-portal';
     portal.innerHTML = `
@@ -802,7 +768,6 @@ class HkiNotificationCard extends LitElement {
       </div>
     `;
     
-    // Add event listeners
     portal.addEventListener('click', (e) => {
       if (e.target === portal) {
         this._closePopup();
@@ -825,7 +790,6 @@ class HkiNotificationCard extends LitElement {
       });
     }
     
-    // Add dismiss button handlers
     const dismissBtns = portal.querySelectorAll('.dismiss-btn');
     dismissBtns.forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -833,7 +797,6 @@ class HkiNotificationCard extends LitElement {
         const msgId = btn.dataset.msgId;
         if (msgId) {
           this._dismissNotification(msgId, e);
-          // Re-render popup after dismiss
           setTimeout(() => {
             if (this._popupOpen) {
               this._createPopupPortal();
@@ -843,7 +806,6 @@ class HkiNotificationCard extends LitElement {
       });
     });
     
-    // Add pill click handlers for tap actions
     const pills = portal.querySelectorAll('.hki-popup-pill.clickable');
     pills.forEach(pill => {
       pill.addEventListener('click', (e) => {
@@ -871,7 +833,7 @@ class HkiNotificationCard extends LitElement {
 
   _renderPopupPillHTML(msg) {
     const icon = msg.icon || "mdi:bell";
-    const showIcon = this._config.show_icon !== false;
+    const showIcon = msg.show_icon !== undefined ? msg.show_icon : (this._config.show_icon !== false);
     const iconAfter = !!this._config.icon_after;
     const spinIcon = msg.icon_spin === true;
     const hasAction = !!msg.tap_action;
@@ -927,9 +889,6 @@ class HkiNotificationCard extends LitElement {
   _handlePopupPillClick(msg) {
     if (!msg.tap_action) return;
     
-    // Check if confirmation is needed:
-    // 1. Per-notification 'confirm' overrides card setting
-    // 2. Fall back to card's global confirm_tap_action
     const needsConfirm = msg.confirm !== undefined ? msg.confirm : this._config.confirm_tap_action;
     
     if (needsConfirm) {
@@ -944,7 +903,7 @@ class HkiNotificationCard extends LitElement {
     if (!action) return "Perform action";
     
     if (action.action === "navigate" && action.navigation_path) {
-      return `Navigate to ${action.navigation_path}`;
+      return `Maps to ${action.navigation_path}`;
     }
     if (action.action === "url" && action.url_path) {
       return `Open ${action.url_path}`;
@@ -996,7 +955,6 @@ class HkiNotificationCard extends LitElement {
   }
 
   _getHeaderCardStyles() {
-    // Try to read CSS variables set by header card parent
     try {
       const computedStyle = getComputedStyle(this);
       const fontSize = computedStyle.getPropertyValue('--hki-notify-font-size').trim();
@@ -1005,7 +963,6 @@ class HkiNotificationCard extends LitElement {
       const iconSize = computedStyle.getPropertyValue('--hki-notify-icon-size').trim();
       const fontFamily = computedStyle.getPropertyValue('--hki-notify-font-family').trim();
       const fontStyle = computedStyle.getPropertyValue('--hki-notify-font-style').trim();
-      // Pill styling
       const pillEnabled = computedStyle.getPropertyValue('--hki-notify-pill-enabled').trim();
       const pillBg = computedStyle.getPropertyValue('--hki-notify-pill-bg').trim();
       const pillPaddingX = computedStyle.getPropertyValue('--hki-notify-pill-padding-x').trim();
@@ -1016,7 +973,6 @@ class HkiNotificationCard extends LitElement {
       const pillBorderWidth = computedStyle.getPropertyValue('--hki-notify-pill-border-width').trim();
       const pillBorderColor = computedStyle.getPropertyValue('--hki-notify-pill-border-color').trim();
       
-      // Only return values if they're actually set
       const result = {};
       if (fontSize && fontSize !== '') result.fontSize = parseInt(fontSize);
       if (fontWeight && fontWeight !== '') result.fontWeight = fontWeight;
@@ -1024,7 +980,6 @@ class HkiNotificationCard extends LitElement {
       if (iconSize && iconSize !== '') result.iconSize = parseInt(iconSize);
       if (fontFamily && fontFamily !== '') result.fontFamily = fontFamily;
       if (fontStyle && fontStyle !== '') result.fontStyle = fontStyle;
-      // Pill settings
       if (pillEnabled === '1') {
         result.pillEnabled = true;
         if (pillBg && pillBg !== '') result.pillBg = pillBg;
@@ -1046,7 +1001,6 @@ class HkiNotificationCard extends LitElement {
   _applyOpacityToColor(color, opacity) {
     if (!color || opacity >= 1) return color;
     
-    // Handle rgba format
     const rgbaMatch = color.match(/rgba?\s*\(\s*([^)]+)\s*\)/i);
     if (rgbaMatch) {
       const parts = rgbaMatch[1].split(',').map(p => p.trim());
@@ -1054,14 +1008,12 @@ class HkiNotificationCard extends LitElement {
         const r = parts[0];
         const g = parts[1];
         const b = parts[2];
-        // If there's an existing alpha, multiply it
         const existingAlpha = parts.length >= 4 ? parseFloat(parts[3]) : 1;
         const newAlpha = (existingAlpha * opacity).toFixed(2);
         return `rgba(${r}, ${g}, ${b}, ${newAlpha})`;
       }
     }
     
-    // Handle hex format
     if (color.startsWith('#')) {
       const hex = color.slice(1);
       let r, g, b;
@@ -1079,9 +1031,8 @@ class HkiNotificationCard extends LitElement {
       return `rgba(${r}, ${g}, ${b}, ${opacity})`;
     }
     
-    // Handle CSS variable - wrap in a fallback with opacity
     if (color.startsWith('var(')) {
-      return color; // Can't easily modify CSS variables, return as-is
+      return color; 
     }
     
     return color;
@@ -1096,7 +1047,6 @@ class HkiNotificationCard extends LitElement {
         this._lastMsgJSON = currentJSON;
         if (this._lastMsgCount <= 0 && msgs.length > 0) this._tickerIndex = 0;
         this._lastMsgCount = msgs.length;
-        // Reset duplicate flag so it re-evaluates after render
         if (this._config?.display_mode === 'marquee') {
           this._marqueeNeedsDuplicate = false;
         }
@@ -1120,10 +1070,6 @@ class HkiNotificationCard extends LitElement {
     const messageCount = this._getMessages().length;
     if (messageCount === 0) return;
     
-    // When in badge slot or nested in parent card (like hki-header-card),
-    // the container often doesn't have constrained width, making overflow
-    // detection unreliable. In these cases, always enable duplicates
-    // to ensure the CSS animation works properly.
     if (this._isInBadgeSlot) {
       if (!this._marqueeNeedsDuplicate) {
         this._marqueeNeedsDuplicate = true;
@@ -1131,7 +1077,6 @@ class HkiNotificationCard extends LitElement {
       return;
     }
     
-    // For normal (non-nested) contexts, check for actual overflow
     const pills = content.querySelectorAll('.pill');
     if (pills.length === 0 || container.clientWidth === 0) return;
     
@@ -1155,7 +1100,6 @@ class HkiNotificationCard extends LitElement {
     const isRealMsg = msg._real !== false; 
     const animClass = (mode === "ticker" && !isSingle && isRealMsg) ? this._animationClass : "";
 
-    // When in header card AND use_header_styling is enabled, inherit styling from parent
     let headerStyles = null;
     const useHeaderStyling = this._isInHeaderCard && c.use_header_styling;
     if (useHeaderStyling) {
@@ -1166,9 +1110,10 @@ class HkiNotificationCard extends LitElement {
     const iconColor = msg.icon_color || msg.color_icon || (useHeaderStyling && headerStyles?.color) || c.icon_color;
     const borderColor = msg.border_color || msg.color_border || c.border_color;
 
-    // Handle background: check show_background and apply opacity
-    // When header pill is enabled and use_header_styling, use header's pill background
-    let showBg = c.show_background !== false;
+    // Handle background & opacity
+    // 1. Check message specific override first, then card config
+    let showBg = msg.show_background !== undefined ? msg.show_background !== false : c.show_background !== false;
+    
     let bgColor = msg.bg_color || msg.color_bg || c.bg_color;
     let backdropBlur = 'blur(12px)';
     let pillPadding = null;
@@ -1178,7 +1123,6 @@ class HkiNotificationCard extends LitElement {
     let pillBorderColor = null;
     
     if (useHeaderStyling && headerStyles?.pillEnabled) {
-      // Use header card's pill styling
       showBg = true;
       bgColor = headerStyles.pillBg || bgColor;
       backdropBlur = `blur(${headerStyles.pillBlur || '0px'})`;
@@ -1187,7 +1131,6 @@ class HkiNotificationCard extends LitElement {
         y: headerStyles.pillPaddingY || '6px'
       };
       borderRadius = parseInt(headerStyles.pillRadius) || borderRadius;
-      // Pill border styles
       if (headerStyles.pillBorderStyle && headerStyles.pillBorderStyle !== 'none') {
         pillBorderStyle = headerStyles.pillBorderStyle;
         pillBorderWidth = headerStyles.pillBorderWidth || '0px';
@@ -1195,17 +1138,19 @@ class HkiNotificationCard extends LitElement {
       }
     } else if (!showBg) {
       bgColor = "transparent";
-    } else if (c.bg_opacity !== undefined && c.bg_opacity < 1) {
-      // Apply opacity to background
-      const opacity = Math.max(0, Math.min(1, parseFloat(c.bg_opacity) || 1));
-      bgColor = this._applyOpacityToColor(bgColor, opacity);
+    } else {
+        // Apply Opacity
+        const opacityVal = msg.bg_opacity !== undefined ? msg.bg_opacity : c.bg_opacity;
+        if (opacityVal !== undefined && opacityVal < 1) {
+            const opacity = Math.max(0, Math.min(1, parseFloat(opacityVal) || 1));
+            bgColor = this._applyOpacityToColor(bgColor, opacity);
+        }
     }
 
     const fontSize = msg.font_size || (useHeaderStyling && headerStyles?.fontSize) || c.font_size;
     const fontWeight = msg.font_weight ? this._getFontWeight(msg.font_weight) : ((useHeaderStyling && headerStyles?.fontWeight) || this._getFontWeight(c.font_weight));
     const fontFamily = msg.font_family || (useHeaderStyling && headerStyles?.fontFamily) || this._getEffectiveFontFamily();
     
-    // Use header pill border or notification card's own border
     const effectiveBorderWidth = pillBorderWidth ? parseInt(pillBorderWidth) : (showBg ? (msg.border_width ?? c.border_width) : 0);
     const effectiveBorderColor = pillBorderColor || (showBg ? borderColor : 'transparent');
     const effectiveBorderStyle = pillBorderStyle || 'solid';
@@ -1228,7 +1173,6 @@ class HkiNotificationCard extends LitElement {
         `--pill-font-family: ${fontFamily}`
     ];
     
-    // Add custom padding if using header pill styling
     if (pillPadding) {
       styles.push(`--pill-padding-x: ${pillPadding.x}`);
       styles.push(`--pill-padding-y: ${pillPadding.y}`);
@@ -1238,7 +1182,7 @@ class HkiNotificationCard extends LitElement {
     const useHeaderPill = useHeaderStyling && headerStyles?.pillEnabled;
 
     const icon = msg.icon || "mdi:bell";
-    const showIcon = c.show_icon !== false;
+    const showIcon = msg.show_icon !== undefined ? msg.show_icon : (c.show_icon !== false);
     const iconAfter = !!c.icon_after;
     const spinIcon = msg.icon_spin === true;
     const hasAction = !!msg.tap_action || (c.popup_enabled !== false && isRealMsg);
@@ -2563,7 +2507,7 @@ class HkiNotificationCardEditor extends LitElement {
     const rgb = ev.detail.value;
     if (rgb && Array.isArray(rgb)) {
       const hexColor = '#' + rgb.map(c => c.toString(16).padStart(2, '0')).join('');
-      this._fireChanged({ ...this._config, [field]: hexColor });
+      this._fireChanged({ ...this._config, [field]: hexColor });a
     }
   }
 

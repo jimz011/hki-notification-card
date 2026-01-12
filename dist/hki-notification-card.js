@@ -124,6 +124,8 @@ class HkiNotificationCard extends LitElement {
       text_color: "var(--primary-text-color)",
       icon_color: "var(--primary-text-color)",
       bg_color: "rgba(var(--rgb-card-background-color, 30, 30, 30), 0.85)",
+      bg_opacity: 1,
+      show_background: true,
       border_color: "rgba(255,255,255,0.08)",
       border_width: 1,
       border_radius: 99,
@@ -630,6 +632,50 @@ class HkiNotificationCard extends LitElement {
     return c.font_family || FONTS[0];
   }
 
+  _applyOpacityToColor(color, opacity) {
+    if (!color || opacity >= 1) return color;
+    
+    // Handle rgba format
+    const rgbaMatch = color.match(/rgba?\s*\(\s*([^)]+)\s*\)/i);
+    if (rgbaMatch) {
+      const parts = rgbaMatch[1].split(',').map(p => p.trim());
+      if (parts.length >= 3) {
+        const r = parts[0];
+        const g = parts[1];
+        const b = parts[2];
+        // If there's an existing alpha, multiply it
+        const existingAlpha = parts.length >= 4 ? parseFloat(parts[3]) : 1;
+        const newAlpha = (existingAlpha * opacity).toFixed(2);
+        return `rgba(${r}, ${g}, ${b}, ${newAlpha})`;
+      }
+    }
+    
+    // Handle hex format
+    if (color.startsWith('#')) {
+      const hex = color.slice(1);
+      let r, g, b;
+      if (hex.length === 3) {
+        r = parseInt(hex[0] + hex[0], 16);
+        g = parseInt(hex[1] + hex[1], 16);
+        b = parseInt(hex[2] + hex[2], 16);
+      } else if (hex.length === 6) {
+        r = parseInt(hex.slice(0, 2), 16);
+        g = parseInt(hex.slice(2, 4), 16);
+        b = parseInt(hex.slice(4, 6), 16);
+      } else {
+        return color;
+      }
+      return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+    }
+    
+    // Handle CSS variable - wrap in a fallback with opacity
+    if (color.startsWith('var(')) {
+      return color; // Can't easily modify CSS variables, return as-is
+    }
+    
+    return color;
+  }
+
   willUpdate(changedProps) {
     super.willUpdate(changedProps);
     if (changedProps.has("hass")) {
@@ -700,15 +746,25 @@ class HkiNotificationCard extends LitElement {
 
     const textColor = msg.text_color || msg.color_text || c.text_color;
     const iconColor = msg.icon_color || msg.color_icon || c.icon_color;
-    const bgColor = msg.bg_color || msg.color_bg || c.bg_color;
     const borderColor = msg.border_color || msg.color_border || c.border_color;
+
+    // Handle background: check show_background and apply opacity
+    const showBg = c.show_background !== false;
+    let bgColor = msg.bg_color || msg.color_bg || c.bg_color;
+    if (!showBg) {
+      bgColor = "transparent";
+    } else if (c.bg_opacity !== undefined && c.bg_opacity < 1) {
+      // Apply opacity to background
+      const opacity = Math.max(0, Math.min(1, parseFloat(c.bg_opacity) || 1));
+      bgColor = this._applyOpacityToColor(bgColor, opacity);
+    }
 
     const fontSize = msg.font_size || c.font_size;
     const fontWeight = msg.font_weight ? this._getFontWeight(msg.font_weight) : this._getFontWeight(c.font_weight);
     const fontFamily = msg.font_family || this._getEffectiveFontFamily();
     const borderRadius = msg.border_radius ?? c.border_radius;
-    const borderWidth = msg.border_width ?? c.border_width;
-    const boxShadow = msg.box_shadow || c.box_shadow;
+    const borderWidth = showBg ? (msg.border_width ?? c.border_width) : 0;
+    const boxShadow = showBg ? (msg.box_shadow || c.box_shadow) : "none";
 
     const msgAlignment = msg.alignment || c.alignment || "left";
 
@@ -716,10 +772,11 @@ class HkiNotificationCard extends LitElement {
         `--pill-color: ${textColor}`,
         `--pill-icon-color: ${iconColor}`,
         `--pill-bg: ${bgColor}`,
-        `--pill-border-color: ${borderColor}`,
+        `--pill-border-color: ${showBg ? borderColor : 'transparent'}`,
         `--pill-border-width: ${borderWidth}px`,
         `--pill-radius: ${borderRadius}px`,
         `--pill-shadow: ${boxShadow}`,
+        `--pill-backdrop: ${showBg ? 'blur(12px)' : 'none'}`,
         `--pill-font-size: ${fontSize}px`,
         `--pill-font-weight: ${fontWeight}`,
         `--pill-font-family: ${fontFamily}`
@@ -1201,8 +1258,8 @@ class HkiNotificationCard extends LitElement {
         border-radius: var(--pill-radius); 
         box-shadow: var(--pill-shadow); 
         padding: 8px 16px; 
-        backdrop-filter: blur(12px); 
-        -webkit-backdrop-filter: blur(12px); 
+        backdrop-filter: var(--pill-backdrop, blur(12px)); 
+        -webkit-backdrop-filter: var(--pill-backdrop, blur(12px)); 
         transform: translate3d(0,0,0); 
         transition: background 0.2s; 
       }
@@ -1890,15 +1947,22 @@ class HkiNotificationCardEditor extends LitElement {
           ${this._renderColorPicker("Text Color", "text_color", this._config.text_color)}
           ${this._renderColorPicker("Icon Color", "icon_color", this._config.icon_color)}
         </div>
-        <div class="side-by-side">
-          ${this._renderColorPicker("Background", "bg_color", this._config.bg_color)}
-          ${this._renderColorPicker("Border Color", "border_color", this._config.border_color)}
-        </div>
-        ${this._renderInput("Box Shadow", "box_shadow", this._config.box_shadow)}
-        <div class="side-by-side">
+        
+        ${this._renderSwitch("Show Background", "show_background", this._config.show_background !== false)}
+        ${this._config.show_background !== false ? html`
+          <div class="side-by-side">
+            ${this._renderColorPicker("Background", "bg_color", this._config.bg_color)}
+            ${this._renderInput("BG Opacity (0-1)", "bg_opacity", this._config.bg_opacity ?? 1, "number", "0.1")}
+          </div>
+          <div class="side-by-side">
+            ${this._renderColorPicker("Border Color", "border_color", this._config.border_color)}
+            ${this._renderInput("Border Width", "border_width", this._config.border_width, "number")}
+          </div>
+          ${this._renderInput("Box Shadow", "box_shadow", this._config.box_shadow)}
           ${this._renderInput("Border Radius", "border_radius", this._config.border_radius, "number")}
-          ${this._renderInput("Border Width", "border_width", this._config.border_width, "number")}
-        </div>
+        ` : html`
+          ${this._renderInput("Border Radius", "border_radius", this._config.border_radius, "number")}
+        `}
 
         <h3>Typography</h3>
         <div class="side-by-side">

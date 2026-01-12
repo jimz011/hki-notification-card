@@ -95,6 +95,9 @@ class HkiNotificationCard extends LitElement {
     this._swipeHandlers = {};
     this._marqueeNeedsDuplicate = false;
     this._confirmationPending = null;
+    // CSS animation drag tracking
+    this._cssScrollOffset = 0;
+    this._cssDragOffset = 0;
   }
 
   setConfig(config) {
@@ -330,7 +333,20 @@ class HkiNotificationCard extends LitElement {
     if (container) this._scrollPos = container.scrollLeft;
     
     const content = this.shadowRoot?.querySelector('.marquee-content');
-    if (content) content.classList.add('paused');
+    if (content) {
+        content.classList.add('paused');
+        
+        // For CSS animation mode, capture current animated position
+        if (this._isInBadgeSlot && this._config.display_mode === 'marquee') {
+            const computedStyle = window.getComputedStyle(content);
+            const matrix = new DOMMatrix(computedStyle.transform);
+            this._cssScrollOffset = matrix.m41; // translateX value
+            this._cssDragOffset = this._cssScrollOffset;
+            // Remove animation and set current position as static transform
+            content.style.animation = 'none';
+            content.style.transform = `translateX(${this._cssScrollOffset}px)`;
+        }
+    }
   }
 
   _onMove(e) {
@@ -344,12 +360,25 @@ class HkiNotificationCard extends LitElement {
     if (diffX > 5 || diffY > 5) {
         this._isDragging = true;
         this._wasDragged = true;
-        if (this._config.display_mode === "marquee" && !this._isInBadgeSlot) {
-             const container = this.shadowRoot?.querySelector('.marquee-container');
-             if (container) {
-                 const deltaX = x - this._dragStart.x;
-                 container.scrollLeft = this._scrollPos - deltaX;
-             }
+        if (this._config.display_mode === "marquee") {
+            if (this._isInBadgeSlot) {
+                // For CSS animation mode, use transform-based dragging
+                const content = this.shadowRoot?.querySelector('.marquee-content');
+                if (content) {
+                    const deltaX = x - this._dragStart.x;
+                    // Get current scroll position from CSS variable or start fresh
+                    const currentOffset = this._cssScrollOffset || 0;
+                    this._cssDragOffset = currentOffset + deltaX;
+                    content.style.transform = `translateX(${this._cssDragOffset}px)`;
+                }
+            } else {
+                // For JS-based scrolling, use scrollLeft
+                const container = this.shadowRoot?.querySelector('.marquee-container');
+                if (container) {
+                    const deltaX = x - this._dragStart.x;
+                    container.scrollLeft = this._scrollPos - deltaX;
+                }
+            }
         }
     }
   }
@@ -364,6 +393,29 @@ class HkiNotificationCard extends LitElement {
     this._isDragging = false;
 
     if (this._config.display_mode === "marquee") {
+        if (this._isInBadgeSlot) {
+            // For CSS animation mode, resume animation after delay
+            const content = this.shadowRoot?.querySelector('.marquee-content');
+            if (content) {
+                // Store the final drag position
+                this._cssScrollOffset = this._cssDragOffset || 0;
+                
+                this._marqueeResumeTimer = setTimeout(() => { 
+                    this._isPaused = false;
+                    if (content) {
+                        // Reset transform and restart CSS animation
+                        content.style.transform = '';
+                        content.style.animation = '';
+                        content.classList.remove('paused');
+                        this._cssScrollOffset = 0;
+                        this._cssDragOffset = 0;
+                    }
+                }, 3000);
+            }
+            return;
+        }
+        
+        // For JS-based scrolling
         const container = this.shadowRoot?.querySelector('.marquee-container');
         if (container) this._scrollPos = container.scrollLeft;
         

@@ -162,21 +162,28 @@ class HkiNotificationCard extends LitElement {
     
     this._detectBadgeSlot();
     
-    // Debounced resize handler to prevent rapid successive calls
-    this._resizeDebounceTimer = null;
     this._resizeObserver = new ResizeObserver(() => {
-        // Debounce resize handling to prevent crash-inducing rapid calls
-        if (this._resizeDebounceTimer) clearTimeout(this._resizeDebounceTimer);
-        this._resizeDebounceTimer = setTimeout(() => {
-            this._detectBadgeSlot();
-            if (this._config.display_mode === 'marquee') {
+        this._detectBadgeSlot();
+        if (this._config.display_mode === 'marquee') {
+            // When using CSS animation (badge slot or nested in parent card),
+            // only check overflow, don't reset the entire ticker
+            if (this._isInBadgeSlot) {
+                this._checkMarqueeOverflow();
+            } else {
                 this._resetTicker();
                 this._checkMarqueeOverflow();
             }
-        }, 100);
+        }
     });
     this._resizeObserver.observe(this);
     this._resetTicker();
+    
+    // Delayed initial overflow check for when card is dynamically created
+    // (ensures DOM is fully rendered with dimensions before checking)
+    if (this._config?.display_mode === 'marquee') {
+        setTimeout(() => this._checkMarqueeOverflow(), 100);
+        setTimeout(() => this._checkMarqueeOverflow(), 500);
+    }
     
     this._boundMouseMove = this._onMove.bind(this);
     this._boundMouseUp = this._onEnd.bind(this);
@@ -199,13 +206,10 @@ class HkiNotificationCard extends LitElement {
         className.includes('badge') ||
         slot.includes('badge') ||
         tagName === 'hui-badge' ||
-        className.includes('header') && className.includes('slot') ||
-        // Detect when nested inside hki-header-card or other custom parent cards
-        // This prevents JS-based marquee animation which causes crashes when nested
-        tagName === 'hki-header-card' ||
-        tagName.startsWith('hki-') ||
-        // Also detect common card wrapper patterns
-        (tagName.includes('card') && tagName !== 'ha-card' && element !== this)
+        (className.includes('header') && className.includes('slot')) ||
+        // Detect when nested inside hki-header-card or similar parent cards
+        // Use CSS animation instead of JS to prevent crash from ResizeObserver loops
+        tagName === 'hki-header-card'
       ) {
         this._isInBadgeSlot = true;
         return;
@@ -222,7 +226,6 @@ class HkiNotificationCard extends LitElement {
     super.disconnectedCallback();
     this._stopTicker();
     this._stopMarquee();
-    if (this._resizeDebounceTimer) clearTimeout(this._resizeDebounceTimer);
     if (this._resizeObserver) this._resizeObserver.disconnect();
     window.removeEventListener("mousemove", this._boundMouseMove);
     window.removeEventListener("mouseup", this._boundMouseUp);
@@ -605,34 +608,36 @@ class HkiNotificationCard extends LitElement {
     const content = this.shadowRoot?.querySelector('.marquee-content');
     if (!container || !content) return;
     
-    // Guard: Don't check if container has no width yet (still rendering)
-    if (container.clientWidth === 0) return;
-    
-    // Get width of just the original content (not duplicates)
-    const pills = content.querySelectorAll('.pill');
     const messageCount = this._getMessages().length;
     if (messageCount === 0) return;
     
-    let originalWidth = 0;
+    // When in badge slot or nested in parent card (like hki-header-card),
+    // the container often doesn't have constrained width, making overflow
+    // detection unreliable. In these cases, always enable duplicates
+    // to ensure the CSS animation works properly.
+    if (this._isInBadgeSlot) {
+      if (!this._marqueeNeedsDuplicate) {
+        this._marqueeNeedsDuplicate = true;
+      }
+      return;
+    }
     
-    // Calculate width of original messages only
+    // For normal (non-nested) contexts, check for actual overflow
+    const pills = content.querySelectorAll('.pill');
+    if (pills.length === 0 || container.clientWidth === 0) return;
+    
+    let originalWidth = 0;
     for (let i = 0; i < Math.min(pills.length, messageCount); i++) {
+      if (pills[i].offsetWidth === 0) return;
       originalWidth += pills[i].offsetWidth;
     }
-    // Add gaps between pills (including trailing gap for seamless loop)
     const gap = parseFloat(this._config.marquee_gap) || 16;
     originalWidth += gap * messageCount;
     
     const needsDuplicate = originalWidth > container.clientWidth;
     
-    // Only update if truly changed - prevents re-render loops
     if (needsDuplicate !== this._marqueeNeedsDuplicate) {
-      // Use a flag to prevent immediate re-checks after update
-      if (this._overflowCheckInProgress) return;
-      this._overflowCheckInProgress = true;
       this._marqueeNeedsDuplicate = needsDuplicate;
-      // Clear the flag after the render cycle completes
-      requestAnimationFrame(() => { this._overflowCheckInProgress = false; });
     }
   }
 
@@ -1051,7 +1056,9 @@ class HkiNotificationCard extends LitElement {
     const listMaxHeight = (c.list_max_items || 3) * itemHeight;
 
     const scrollDuration = this._calculateScrollDuration(messages);
-    const useCSSAnimation = this._isInBadgeSlot && c.auto_scroll !== false;
+    // Only use CSS animation when in badge slot/nested AND duplicates are rendered
+    // The -50% translateX animation requires duplicated content to loop properly
+    const useCSSAnimation = this._isInBadgeSlot && c.auto_scroll !== false && this._marqueeNeedsDuplicate;
 
     const standardStyles = containerStyles + [
         `; --enter-x: ${startX}`, `--enter-y: ${startY}`,

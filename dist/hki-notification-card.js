@@ -98,6 +98,8 @@ class HkiNotificationCard extends LitElement {
     // CSS animation drag tracking
     this._cssScrollOffset = 0;
     this._cssDragOffset = 0;
+    // Popup portal container
+    this._popupPortal = null;
   }
 
   setConfig(config) {
@@ -234,6 +236,8 @@ class HkiNotificationCard extends LitElement {
     if (this._resizeObserver) this._resizeObserver.disconnect();
     window.removeEventListener("mousemove", this._boundMouseMove);
     window.removeEventListener("mouseup", this._boundMouseUp);
+    // Clean up popup portal if open
+    this._removePopupPortal();
   }
 
   _stopTicker() {
@@ -529,11 +533,359 @@ class HkiNotificationCard extends LitElement {
 
   _openPopup() {
     this._popupOpen = true;
+    this._createPopupPortal();
   }
 
   _closePopup(e) {
     if (e) e.stopPropagation();
     this._popupOpen = false;
+    this._removePopupPortal();
+  }
+
+  _removePopupPortal() {
+    if (this._popupPortal) {
+      this._popupPortal.remove();
+      this._popupPortal = null;
+    }
+  }
+
+  _createPopupPortal() {
+    this._removePopupPortal();
+    
+    const messages = this._getMessages();
+    const realMessages = messages.filter(m => m._real !== false);
+    const count = realMessages.length;
+    const c = this._config;
+    
+    // Create portal container
+    const portal = document.createElement('div');
+    portal.className = 'hki-notification-popup-portal';
+    portal.innerHTML = `
+      <style>
+        .hki-notification-popup-portal {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.6);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 9999;
+          backdrop-filter: blur(4px);
+          -webkit-backdrop-filter: blur(4px);
+        }
+        .hki-popup-container {
+          background: var(--card-background-color, #1c1c1c);
+          border-radius: 16px;
+          min-width: 320px;
+          max-width: 90vw;
+          max-height: 80vh;
+          display: flex;
+          flex-direction: column;
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+          overflow: hidden;
+        }
+        .hki-popup-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 16px 20px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .hki-popup-title {
+          font-size: 18px;
+          font-weight: 600;
+          color: var(--primary-text-color);
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .hki-popup-count-badge {
+          min-width: 22px;
+          height: 22px;
+          padding: 0 6px;
+          border-radius: 11px;
+          background: rgba(255, 255, 255, 0.15);
+          color: var(--primary-text-color);
+          font-size: 12px;
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-sizing: border-box;
+        }
+        .hki-popup-close-btn {
+          background: transparent;
+          border: none;
+          border-radius: 50%;
+          width: 36px;
+          height: 36px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: background 0.2s;
+          color: var(--primary-text-color);
+          opacity: 0.7;
+        }
+        .hki-popup-close-btn:hover {
+          background: rgba(255, 255, 255, 0.1);
+          opacity: 1;
+        }
+        .hki-popup-close-btn ha-icon {
+          --mdc-icon-size: 20px;
+        }
+        .hki-popup-content {
+          flex: 1;
+          overflow-y: auto;
+          padding: 12px 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .hki-popup-empty {
+          text-align: center;
+          padding: 32px;
+          color: var(--secondary-text-color);
+        }
+        .hki-popup-footer {
+          padding: 12px 16px;
+          border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .hki-popup-clear-all-btn {
+          width: 100%;
+          background: rgba(255, 255, 255, 0.1);
+          border: none;
+          border-radius: 8px;
+          padding: 12px;
+          color: var(--primary-text-color);
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+        .hki-popup-clear-all-btn:hover {
+          background: rgba(255, 255, 255, 0.15);
+        }
+        .hki-popup-pill-wrapper {
+          position: relative;
+          overflow: hidden;
+        }
+        .hki-popup-pill-swipe-bg {
+          position: absolute;
+          right: 0;
+          top: 0;
+          bottom: 0;
+          width: 80px;
+          background: #ff4444;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          visibility: hidden;
+          opacity: 0;
+          border-radius: 12px;
+          z-index: 1;
+        }
+        .hki-popup-pill-swipe-bg ha-icon {
+          --mdc-icon-size: 24px;
+        }
+        .hki-popup-pill {
+          box-sizing: border-box;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          width: 100%;
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 12px;
+          padding: 12px 16px;
+          padding-right: 70px;
+          position: relative;
+          z-index: 2;
+          transition: transform 0.2s ease-out;
+        }
+        .hki-popup-pill.clickable {
+          cursor: pointer;
+          padding-right: 90px;
+        }
+        .hki-popup-pill.clickable:hover {
+          filter: brightness(1.1);
+        }
+        .hki-popup-pill .icon {
+          color: var(--primary-text-color);
+          --mdc-icon-size: 20px;
+          flex-shrink: 0;
+        }
+        .hki-popup-pill .icon.spinning {
+          animation: hki-spin 2s linear infinite;
+        }
+        @keyframes hki-spin { 100% { transform: rotate(360deg); } }
+        .hki-popup-pill .text {
+          color: var(--primary-text-color);
+          font-size: 14px;
+          font-weight: 500;
+          flex: 1;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .hki-popup-pill .action-indicator {
+          position: absolute;
+          right: 36px;
+          top: 50%;
+          transform: translateY(-50%);
+          --mdc-icon-size: 18px;
+          color: var(--primary-text-color);
+          opacity: 0.5;
+        }
+        .hki-popup-pill .dismiss-btn {
+          position: absolute;
+          right: 8px;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 24px;
+          height: 24px;
+          color: var(--primary-text-color);
+          opacity: 0.5;
+          cursor: pointer;
+          background: none;
+          border: none;
+          padding: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 50%;
+          transition: opacity 0.2s, background 0.2s;
+        }
+        .hki-popup-pill .dismiss-btn:hover {
+          opacity: 1;
+          background: rgba(255,255,255,0.1);
+        }
+        .hki-popup-pill .dismiss-btn ha-icon {
+          --mdc-icon-size: 16px;
+        }
+      </style>
+      <div class="hki-popup-container">
+        <div class="hki-popup-header">
+          <span class="hki-popup-title">
+            ${c.popup_title || 'Notifications'}
+            <span class="hki-popup-count-badge">${count}</span>
+          </span>
+          <button class="hki-popup-close-btn">
+            <ha-icon icon="mdi:close"></ha-icon>
+          </button>
+        </div>
+        <div class="hki-popup-content">
+          ${realMessages.length > 0 ? realMessages.map(msg => this._renderPopupPillHTML(msg)).join('') : `
+            <div class="hki-popup-empty">No notifications</div>
+          `}
+        </div>
+        ${realMessages.length > 0 ? `
+          <div class="hki-popup-footer">
+            <button class="hki-popup-clear-all-btn">Clear All</button>
+          </div>
+        ` : ''}
+      </div>
+    `;
+    
+    // Add event listeners
+    portal.addEventListener('click', (e) => {
+      if (e.target === portal) {
+        this._closePopup();
+      }
+    });
+    
+    const closeBtn = portal.querySelector('.hki-popup-close-btn');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._closePopup();
+      });
+    }
+    
+    const clearAllBtn = portal.querySelector('.hki-popup-clear-all-btn');
+    if (clearAllBtn) {
+      clearAllBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._clearAllNotifications(e);
+      });
+    }
+    
+    // Add dismiss button handlers
+    const dismissBtns = portal.querySelectorAll('.dismiss-btn');
+    dismissBtns.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const msgId = btn.dataset.msgId;
+        if (msgId) {
+          this._dismissNotification(msgId, e);
+          // Re-render popup after dismiss
+          setTimeout(() => {
+            if (this._popupOpen) {
+              this._createPopupPortal();
+            }
+          }, 100);
+        }
+      });
+    });
+    
+    // Add pill click handlers for tap actions
+    const pills = portal.querySelectorAll('.hki-popup-pill.clickable');
+    pills.forEach(pill => {
+      pill.addEventListener('click', (e) => {
+        if (e.target.closest('.dismiss-btn')) return;
+        const msgIndex = pill.dataset.msgIndex;
+        if (msgIndex !== undefined) {
+          const msg = realMessages[parseInt(msgIndex)];
+          if (msg?.tap_action) {
+            const needsConfirm = msg.confirm !== undefined ? msg.confirm : this._config.confirm_tap_action;
+            if (needsConfirm) {
+              this._confirmationPending = msg;
+              this._closePopup();
+              this.requestUpdate();
+            } else {
+              this._executeTapAction(msg.tap_action);
+            }
+          }
+        }
+      });
+    });
+    
+    document.body.appendChild(portal);
+    this._popupPortal = portal;
+  }
+
+  _renderPopupPillHTML(msg) {
+    const icon = msg.icon || "mdi:bell";
+    const showIcon = this._config.show_icon !== false;
+    const iconAfter = !!this._config.icon_after;
+    const spinIcon = msg.icon_spin === true;
+    const hasAction = !!msg.tap_action;
+    const isRealMsg = msg._real !== false;
+    const messages = this._getMessages().filter(m => m._real !== false);
+    const msgIndex = messages.indexOf(msg);
+    
+    return `
+      <div class="hki-popup-pill-wrapper">
+        <div class="hki-popup-pill-swipe-bg">
+          <ha-icon icon="mdi:delete"></ha-icon>
+        </div>
+        <div class="hki-popup-pill ${hasAction ? 'clickable' : ''}" data-msg-index="${msgIndex}">
+          ${showIcon && !iconAfter ? `<ha-icon class="icon ${spinIcon ? 'spinning' : ''}" icon="${icon}"></ha-icon>` : ''}
+          <div class="text">${msg.message}</div>
+          ${showIcon && iconAfter ? `<ha-icon class="icon ${spinIcon ? 'spinning' : ''}" icon="${icon}"></ha-icon>` : ''}
+          ${hasAction ? `<ha-icon class="action-indicator" icon="mdi:chevron-right"></ha-icon>` : ''}
+          ${isRealMsg ? `
+            <button class="dismiss-btn" data-msg-id="${msg.id}">
+              <ha-icon icon="mdi:close"></ha-icon>
+            </button>
+          ` : ''}
+        </div>
+      </div>
+    `;
   }
 
   _handlePopupBackdropClick(e) {

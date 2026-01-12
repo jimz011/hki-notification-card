@@ -90,6 +90,7 @@ class HkiNotificationCard extends LitElement {
     this._lastMsgCount = -1;
     this._lastMsgJSON = "";
     this._isInBadgeSlot = false;
+    this._isInHeaderCard = false;
     this._popupOpen = false;
     this._popupPillSwipe = null;
     this._swipeHandlers = {};
@@ -121,6 +122,9 @@ class HkiNotificationCard extends LitElement {
       direction: "right",
       alignment: "left",
       full_width: false,
+      // Header card integration
+      use_header_styling: false,
+      // Appearance
       show_icon: true,
       icon_after: false,
       text_color: "var(--primary-text-color)",
@@ -150,6 +154,7 @@ class HkiNotificationCard extends LitElement {
       button_show_badge: true,
       button_badge_color: "#ff4444",
       button_badge_text_color: "#ffffff",
+      button_badge_size: 0, // 0 = auto (scales with button_size)
       // Pill button options (when label_position is "inside")
       button_pill_size: 14,
       button_pill_full_width: false,
@@ -203,20 +208,26 @@ class HkiNotificationCard extends LitElement {
     let depth = 0;
     const maxDepth = 15;
     
+    this._isInHeaderCard = false;
+    
     while (element && depth < maxDepth) {
       const tagName = element.tagName?.toLowerCase() || '';
       const className = element.className || '';
       const slot = element.getAttribute?.('slot') || '';
+      
+      // Check specifically for header card
+      if (tagName === 'hki-header-card') {
+        this._isInBadgeSlot = true;
+        this._isInHeaderCard = true;
+        return;
+      }
       
       if (
         tagName.includes('badge') ||
         className.includes('badge') ||
         slot.includes('badge') ||
         tagName === 'hui-badge' ||
-        (className.includes('header') && className.includes('slot')) ||
-        // Detect when nested inside hki-header-card or similar parent cards
-        // Use CSS animation instead of JS to prevent crash from ResizeObserver loops
-        tagName === 'hki-header-card'
+        (className.includes('header') && className.includes('slot'))
       ) {
         this._isInBadgeSlot = true;
         return;
@@ -984,6 +995,48 @@ class HkiNotificationCard extends LitElement {
     return c.font_family || FONTS[0];
   }
 
+  _getHeaderCardStyles() {
+    // Try to read CSS variables set by header card parent
+    try {
+      const computedStyle = getComputedStyle(this);
+      const fontSize = computedStyle.getPropertyValue('--hki-notify-font-size').trim();
+      const fontWeight = computedStyle.getPropertyValue('--hki-notify-font-weight').trim();
+      const color = computedStyle.getPropertyValue('--hki-notify-color').trim();
+      const iconSize = computedStyle.getPropertyValue('--hki-notify-icon-size').trim();
+      const fontFamily = computedStyle.getPropertyValue('--hki-notify-font-family').trim();
+      const fontStyle = computedStyle.getPropertyValue('--hki-notify-font-style').trim();
+      // Pill styling
+      const pillEnabled = computedStyle.getPropertyValue('--hki-notify-pill-enabled').trim();
+      const pillBg = computedStyle.getPropertyValue('--hki-notify-pill-bg').trim();
+      const pillPaddingX = computedStyle.getPropertyValue('--hki-notify-pill-padding-x').trim();
+      const pillPaddingY = computedStyle.getPropertyValue('--hki-notify-pill-padding-y').trim();
+      const pillRadius = computedStyle.getPropertyValue('--hki-notify-pill-radius').trim();
+      const pillBlur = computedStyle.getPropertyValue('--hki-notify-pill-blur').trim();
+      
+      // Only return values if they're actually set
+      const result = {};
+      if (fontSize && fontSize !== '') result.fontSize = parseInt(fontSize);
+      if (fontWeight && fontWeight !== '') result.fontWeight = fontWeight;
+      if (color && color !== '') result.color = color;
+      if (iconSize && iconSize !== '') result.iconSize = parseInt(iconSize);
+      if (fontFamily && fontFamily !== '') result.fontFamily = fontFamily;
+      if (fontStyle && fontStyle !== '') result.fontStyle = fontStyle;
+      // Pill settings
+      if (pillEnabled === '1') {
+        result.pillEnabled = true;
+        if (pillBg && pillBg !== '') result.pillBg = pillBg;
+        if (pillPaddingX && pillPaddingX !== '') result.pillPaddingX = pillPaddingX;
+        if (pillPaddingY && pillPaddingY !== '') result.pillPaddingY = pillPaddingY;
+        if (pillRadius && pillRadius !== '') result.pillRadius = pillRadius;
+        if (pillBlur && pillBlur !== '') result.pillBlur = pillBlur;
+      }
+      
+      return Object.keys(result).length > 0 ? result : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   _applyOpacityToColor(color, opacity) {
     if (!color || opacity >= 1) return color;
     
@@ -1096,14 +1149,36 @@ class HkiNotificationCard extends LitElement {
     const isRealMsg = msg._real !== false; 
     const animClass = (mode === "ticker" && !isSingle && isRealMsg) ? this._animationClass : "";
 
-    const textColor = msg.text_color || msg.color_text || c.text_color;
-    const iconColor = msg.icon_color || msg.color_icon || c.icon_color;
+    // When in header card AND use_header_styling is enabled, inherit styling from parent
+    let headerStyles = null;
+    const useHeaderStyling = this._isInHeaderCard && c.use_header_styling;
+    if (useHeaderStyling) {
+      headerStyles = this._getHeaderCardStyles();
+    }
+
+    const textColor = msg.text_color || msg.color_text || (useHeaderStyling && headerStyles?.color) || c.text_color;
+    const iconColor = msg.icon_color || msg.color_icon || (useHeaderStyling && headerStyles?.color) || c.icon_color;
     const borderColor = msg.border_color || msg.color_border || c.border_color;
 
     // Handle background: check show_background and apply opacity
-    const showBg = c.show_background !== false;
+    // When header pill is enabled and use_header_styling, use header's pill background
+    let showBg = c.show_background !== false;
     let bgColor = msg.bg_color || msg.color_bg || c.bg_color;
-    if (!showBg) {
+    let backdropBlur = 'blur(12px)';
+    let pillPadding = null;
+    let borderRadius = msg.border_radius ?? c.border_radius;
+    
+    if (useHeaderStyling && headerStyles?.pillEnabled) {
+      // Use header card's pill styling
+      showBg = true;
+      bgColor = headerStyles.pillBg || bgColor;
+      backdropBlur = `blur(${headerStyles.pillBlur || '0px'})`;
+      pillPadding = {
+        x: headerStyles.pillPaddingX || '10px',
+        y: headerStyles.pillPaddingY || '6px'
+      };
+      borderRadius = parseInt(headerStyles.pillRadius) || borderRadius;
+    } else if (!showBg) {
       bgColor = "transparent";
     } else if (c.bg_opacity !== undefined && c.bg_opacity < 1) {
       // Apply opacity to background
@@ -1111,10 +1186,9 @@ class HkiNotificationCard extends LitElement {
       bgColor = this._applyOpacityToColor(bgColor, opacity);
     }
 
-    const fontSize = msg.font_size || c.font_size;
-    const fontWeight = msg.font_weight ? this._getFontWeight(msg.font_weight) : this._getFontWeight(c.font_weight);
-    const fontFamily = msg.font_family || this._getEffectiveFontFamily();
-    const borderRadius = msg.border_radius ?? c.border_radius;
+    const fontSize = msg.font_size || (useHeaderStyling && headerStyles?.fontSize) || c.font_size;
+    const fontWeight = msg.font_weight ? this._getFontWeight(msg.font_weight) : ((useHeaderStyling && headerStyles?.fontWeight) || this._getFontWeight(c.font_weight));
+    const fontFamily = msg.font_family || (useHeaderStyling && headerStyles?.fontFamily) || this._getEffectiveFontFamily();
     const borderWidth = showBg ? (msg.border_width ?? c.border_width) : 0;
     const boxShadow = showBg ? (msg.box_shadow || c.box_shadow) : "none";
 
@@ -1128,11 +1202,20 @@ class HkiNotificationCard extends LitElement {
         `--pill-border-width: ${borderWidth}px`,
         `--pill-radius: ${borderRadius}px`,
         `--pill-shadow: ${boxShadow}`,
-        `--pill-backdrop: ${showBg ? 'blur(12px)' : 'none'}`,
+        `--pill-backdrop: ${showBg ? backdropBlur : 'none'}`,
         `--pill-font-size: ${fontSize}px`,
         `--pill-font-weight: ${fontWeight}`,
         `--pill-font-family: ${fontFamily}`
-    ].join(";");
+    ];
+    
+    // Add custom padding if using header pill styling
+    if (pillPadding) {
+      styles.push(`--pill-padding-x: ${pillPadding.x}`);
+      styles.push(`--pill-padding-y: ${pillPadding.y}`);
+    }
+    
+    const stylesStr = styles.join(";");
+    const useHeaderPill = useHeaderStyling && headerStyles?.pillEnabled;
 
     const icon = msg.icon || "mdi:bell";
     const showIcon = c.show_icon !== false;
@@ -1142,10 +1225,12 @@ class HkiNotificationCard extends LitElement {
     const isFullWidth = c.full_width && mode !== 'marquee';
     const widthClass = isFullWidth ? "full" : "";
     const alignClass = isFullWidth ? `align-${msgAlignment}` : "";
+    const noBgClass = !showBg ? "no-bg" : "";
+    const headerPillClass = useHeaderPill ? "header-pill" : "";
 
     return html`
-        <div class="pill ${animClass} ${widthClass} ${alignClass} ${hasAction ? "clickable" : ""}" 
-             style="${styles}" 
+        <div class="pill ${animClass} ${widthClass} ${alignClass} ${noBgClass} ${headerPillClass} ${hasAction ? "clickable" : ""}" 
+             style="${stylesStr}" 
              @click=${(e) => { e.stopPropagation(); this._handleClick(msg, e); }}>
           ${showIcon && !iconAfter ? html`<ha-icon class="icon ${spinIcon ? "spinning" : ""}" .icon=${icon}></ha-icon>` : ''}
           <div class="text">${msg.message}</div>
@@ -1167,12 +1252,17 @@ class HkiNotificationCard extends LitElement {
     if (c.alignment === "left") contentAlign = "flex-start";
     if (c.alignment === "right") contentAlign = "flex-end";
     
+    // Calculate badge size - if 0 (auto), scale with button size
+    const buttonSize = c.button_size || 48;
+    const badgeSize = c.button_badge_size > 0 ? c.button_badge_size : Math.max(16, Math.round(buttonSize * 0.4));
+    
     const iconButtonStyles = [
-      `--button-size: ${c.button_size || 48}px`,
+      `--button-size: ${buttonSize}px`,
       `--button-bg: ${c.button_bg_color}`,
       `--button-icon-color: ${c.button_icon_color}`,
       `--badge-color: ${c.button_badge_color}`,
       `--badge-text-color: ${c.button_badge_text_color}`,
+      `--badge-size: ${badgeSize}px`,
       `--content-align: ${contentAlign}`
     ].join(";");
     
@@ -1186,6 +1276,7 @@ class HkiNotificationCard extends LitElement {
       `--button-icon-color: ${c.button_icon_color}`,
       `--badge-color: ${c.button_badge_color}`,
       `--badge-text-color: ${c.button_badge_text_color}`,
+      `--badge-size: ${badgeSize}px`,
       `--content-align: ${contentAlign}`
     ].join(";");
     
@@ -1471,16 +1562,25 @@ class HkiNotificationCard extends LitElement {
     if (c.alignment === "center") alignValue = "center";
     if (c.alignment === "right") alignValue = "flex-end";
     
+    // When in header card, force list mode to marquee (list doesn't work well in header)
+    // But keep button mode available
+    if (this._isInHeaderCard && mode === 'list') {
+      mode = 'marquee';
+    }
+    
     const containerStyles = [
         `--anim-duration: ${c.animation_duration || 0.5}s`,
         `--marquee-gap: ${c.marquee_gap || 16}px`,
         `--align-value: ${alignValue}`
     ].join(";");
     
+    // Add class when in header card for badge overflow handling
+    const headerClass = this._isInHeaderCard ? 'in-header-card' : '';
+    
     if (mode === 'button') {
       this.style.display = "block";
       return html`
-        <div class="wrapper button-mode-wrapper" style="${containerStyles}">
+        <div class="wrapper button-mode-wrapper ${headerClass}" style="${containerStyles}">
           ${this._renderButton(realMessageCount)}
         </div>
         ${this._popupOpen ? this._renderPopup(messages) : ''}
@@ -1565,6 +1665,12 @@ class HkiNotificationCard extends LitElement {
         justify-content: var(--align-value, flex-start);
       }
       
+      /* When in header card, add padding to prevent badge from being clipped */
+      .wrapper.button-mode-wrapper.in-header-card {
+        padding: 8px;
+        box-sizing: border-box;
+      }
+      
       .ticker-container { display: flex; overflow: hidden; justify-content: var(--align-value, flex-start); width: 100%; }
       .marquee-container { width: 100%; overflow: hidden; white-space: nowrap; }
       
@@ -1614,6 +1720,10 @@ class HkiNotificationCard extends LitElement {
         -webkit-backdrop-filter: var(--pill-backdrop, blur(12px)); 
         transform: translate3d(0,0,0); 
         transition: background 0.2s; 
+      }
+      /* When using header pill styling, use header's padding */
+      .pill.header-pill {
+        padding: var(--pill-padding-y, 8px) var(--pill-padding-x, 16px);
       }
       .list-container .pill:not(.popup-pill):not(.full) { width: auto; }
       .pill.full { width: 100%; }
@@ -1682,6 +1792,14 @@ class HkiNotificationCard extends LitElement {
       @keyframes spin { 100% { transform: rotate(360deg); } }
       .text { color: var(--pill-color); font-size: var(--pill-font-size); font-weight: var(--pill-font-weight); font-family: var(--pill-font-family); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; }
       
+      /* When background is hidden, add text shadow like header weather/datetime */
+      .pill.no-bg .icon {
+        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
+      }
+      .pill.no-bg .text {
+        text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+      }
+      
       .notification-pill-wrapper {
         display: inline-flex;
         align-items: center;
@@ -1693,15 +1811,15 @@ class HkiNotificationCard extends LitElement {
       
       .pill-outside-badge {
         position: absolute;
-        top: -6px;
-        right: -6px;
-        min-width: 18px;
-        height: 18px;
-        padding: 0 5px;
-        border-radius: 9px;
+        top: calc(var(--badge-size, 18px) * -0.33);
+        right: calc(var(--badge-size, 18px) * -0.33);
+        min-width: var(--badge-size, 18px);
+        height: var(--badge-size, 18px);
+        padding: 0 calc(var(--badge-size, 18px) * 0.28);
+        border-radius: calc(var(--badge-size, 18px) * 0.5);
         background: var(--badge-color, #ff4444);
         color: var(--badge-text-color, #ffffff);
-        font-size: 11px;
+        font-size: calc(var(--badge-size, 18px) * 0.6);
         font-weight: 600;
         display: flex;
         align-items: center;
@@ -1929,15 +2047,15 @@ class HkiNotificationCard extends LitElement {
       
       .button-badge {
         position: absolute;
-        top: -4px;
-        right: -4px;
-        min-width: 18px;
-        height: 18px;
-        padding: 0 5px;
-        border-radius: 9px;
+        top: calc(var(--badge-size, 18px) * -0.25);
+        right: calc(var(--badge-size, 18px) * -0.25);
+        min-width: var(--badge-size, 18px);
+        height: var(--badge-size, 18px);
+        padding: 0 calc(var(--badge-size, 18px) * 0.28);
+        border-radius: calc(var(--badge-size, 18px) * 0.5);
         background: var(--badge-color, #ff4444);
         color: var(--badge-text-color, #ffffff);
-        font-size: 11px;
+        font-size: calc(var(--badge-size, 18px) * 0.6);
         font-weight: 600;
         display: flex;
         align-items: center;
@@ -2004,13 +2122,13 @@ class HkiNotificationCard extends LitElement {
       }
       
       .pill-button-badge {
-        min-width: 18px;
-        height: 18px;
-        padding: 0 5px;
-        border-radius: 9px;
+        min-width: var(--badge-size, 18px);
+        height: var(--badge-size, 18px);
+        padding: 0 calc(var(--badge-size, 18px) * 0.28);
+        border-radius: calc(var(--badge-size, 18px) * 0.5);
         background: var(--badge-color, #ff4444);
         color: var(--badge-text-color, #ffffff);
-        font-size: 11px;
+        font-size: calc(var(--badge-size, 18px) * 0.6);
         font-weight: 600;
         display: flex;
         align-items: center;
@@ -2239,6 +2357,7 @@ class HkiNotificationCardEditor extends LitElement {
                 ${this._renderColorPicker("Badge Color", "button_badge_color", this._config.button_badge_color || "#ff4444")}
                 ${this._renderColorPicker("Badge Text", "button_badge_text_color", this._config.button_badge_text_color || "#ffffff")}
               </div>
+              ${this._renderInput("Badge Size (0=auto)", "button_badge_size", this._config.button_badge_size ?? 0, "number")}
             ` : ''}
         ` : html`
             <div class="side-by-side">
@@ -2284,6 +2403,14 @@ class HkiNotificationCardEditor extends LitElement {
         </ha-alert>
         
         ${mode !== 'button' ? html`
+        <h3>Header Card Integration</h3>
+        ${this._renderSwitch("Use Header Styling", "use_header_styling", this._config.use_header_styling)}
+        ${this._config.use_header_styling ? html`
+          <ha-alert alert-type="info">
+            When inside hki-header-card, font size, weight, color, and pill styling will be inherited from the header card's Info Display settings.
+          </ha-alert>
+        ` : ''}
+        
         <h3>Appearance</h3>
         <div class="side-by-side ${mode === 'marquee' ? '' : 'three-col'}">
            ${this._renderSwitch("Show Icon", "show_icon", this._config.show_icon)}
@@ -2295,6 +2422,7 @@ class HkiNotificationCardEditor extends LitElement {
           ${["left","center","right"].map(a => html`<mwc-list-item .value=${a}>${a.charAt(0).toUpperCase() + a.slice(1)}</mwc-list-item>`)}
         </ha-select>
 
+        ${!this._config.use_header_styling ? html`
         <div class="side-by-side">
           ${this._renderColorPicker("Text Color", "text_color", this._config.text_color)}
           ${this._renderColorPicker("Icon Color", "icon_color", this._config.icon_color)}
@@ -2329,6 +2457,7 @@ class HkiNotificationCardEditor extends LitElement {
         ${showCustomFont ? html`
           ${this._renderInput("Custom Font Family", "custom_font_family", this._config.custom_font_family || "", "text")}
           <p class="helper-text">Enter a CSS font-family value (e.g., "Comic Sans MS, cursive")</p>
+        ` : ''}
         ` : ''}
         ` : ''}
       </div>

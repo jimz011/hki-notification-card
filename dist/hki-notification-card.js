@@ -1,5 +1,5 @@
 /* HKI Notification Card
- * Version: 18.3.2 (Fix: ResizeObserver Debounce)
+ * Version: 18.3.1 (Per-Notification Confirmation Override)
  */
 
 const _getLit = () => {
@@ -95,7 +95,6 @@ class HkiNotificationCard extends LitElement {
     this._swipeHandlers = {};
     this._marqueeNeedsDuplicate = false;
     this._confirmationPending = null;
-    this._resizeTimer = null; // Added for debounce
   }
 
   setConfig(config) {
@@ -163,22 +162,13 @@ class HkiNotificationCard extends LitElement {
     
     this._detectBadgeSlot();
     
-    // Debounced ResizeObserver to prevent infinite loops and crashes
     this._resizeObserver = new ResizeObserver(() => {
-      if (this._resizeTimer) return;
-      
-      this._resizeTimer = requestAnimationFrame(() => {
-        this._resizeTimer = null;
-        if (!this.isConnected) return;
-        
         this._detectBadgeSlot();
-        if (this._config?.display_mode === 'marquee') {
+        if (this._config.display_mode === 'marquee') {
             this._resetTicker();
             this._checkMarqueeOverflow();
         }
-      });
     });
-
     this._resizeObserver.observe(this);
     this._resetTicker();
     
@@ -221,7 +211,6 @@ class HkiNotificationCard extends LitElement {
     this._stopTicker();
     this._stopMarquee();
     if (this._resizeObserver) this._resizeObserver.disconnect();
-    if (this._resizeTimer) cancelAnimationFrame(this._resizeTimer);
     window.removeEventListener("mousemove", this._boundMouseMove);
     window.removeEventListener("mouseup", this._boundMouseUp);
   }
@@ -522,7 +511,7 @@ class HkiNotificationCard extends LitElement {
     if (!action) return "Perform action";
     
     if (action.action === "navigate" && action.navigation_path) {
-      return `Maps to ${action.navigation_path}`;
+      return `Navigate to ${action.navigation_path}`;
     }
     if (action.action === "url" && action.url_path) {
       return `Open ${action.url_path}`;

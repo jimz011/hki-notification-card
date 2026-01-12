@@ -1,5 +1,5 @@
 /* HKI Notification Card
- * Version: 18.3.1 (Per-Notification Confirmation Override)
+ * Version: 18.3.2 (Resize Loop Fix)
  */
 
 const _getLit = () => {
@@ -95,6 +95,10 @@ class HkiNotificationCard extends LitElement {
     this._swipeHandlers = {};
     this._marqueeNeedsDuplicate = false;
     this._confirmationPending = null;
+    
+    // Resize loop protection
+    this._lastWidth = 0;
+    this._resizeTimer = null;
   }
 
   setConfig(config) {
@@ -162,13 +166,29 @@ class HkiNotificationCard extends LitElement {
     
     this._detectBadgeSlot();
     
-    this._resizeObserver = new ResizeObserver(() => {
+    // CRITICAL FIX: Debounced ResizeObserver with width check to prevent infinite loops in Flex containers
+    this._resizeObserver = new ResizeObserver((entries) => {
+        if (!entries || !entries.length) return;
+        
+        const entry = entries[0];
+        const newWidth = entry.contentRect.width;
+
+        // Ignore if width hasn't changed significantly (prevents loops when height changes due to content reflow)
+        if (this._lastWidth && Math.abs(this._lastWidth - newWidth) < 2) return;
+        this._lastWidth = newWidth;
+
         this._detectBadgeSlot();
+        
         if (this._config.display_mode === 'marquee') {
-            this._resetTicker();
-            this._checkMarqueeOverflow();
+            // Debounce the heavy logic
+            if (this._resizeTimer) clearTimeout(this._resizeTimer);
+            this._resizeTimer = setTimeout(() => {
+                this._resetTicker();
+                this._checkMarqueeOverflow();
+            }, 200);
         }
     });
+
     this._resizeObserver.observe(this);
     this._resetTicker();
     
@@ -211,6 +231,7 @@ class HkiNotificationCard extends LitElement {
     this._stopTicker();
     this._stopMarquee();
     if (this._resizeObserver) this._resizeObserver.disconnect();
+    if (this._resizeTimer) clearTimeout(this._resizeTimer);
     window.removeEventListener("mousemove", this._boundMouseMove);
     window.removeEventListener("mouseup", this._boundMouseUp);
   }
@@ -511,7 +532,7 @@ class HkiNotificationCard extends LitElement {
     if (!action) return "Perform action";
     
     if (action.action === "navigate" && action.navigation_path) {
-      return `Navigate to ${action.navigation_path}`;
+      return `Maps to ${action.navigation_path}`;
     }
     if (action.action === "url" && action.url_path) {
       return `Open ${action.url_path}`;

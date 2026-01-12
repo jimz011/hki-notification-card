@@ -1,5 +1,5 @@
 /* HKI Notification Card
- * Version: 18.3.2 (Resize Loop Fix)
+ * Version: 18.3.1 (Per-Notification Confirmation Override)
  */
 
 const _getLit = () => {
@@ -95,10 +95,6 @@ class HkiNotificationCard extends LitElement {
     this._swipeHandlers = {};
     this._marqueeNeedsDuplicate = false;
     this._confirmationPending = null;
-    
-    // Resize loop protection
-    this._lastWidth = 0;
-    this._resizeTimer = null;
   }
 
   setConfig(config) {
@@ -166,29 +162,19 @@ class HkiNotificationCard extends LitElement {
     
     this._detectBadgeSlot();
     
-    // CRITICAL FIX: Debounced ResizeObserver with width check to prevent infinite loops in Flex containers
-    this._resizeObserver = new ResizeObserver((entries) => {
-        if (!entries || !entries.length) return;
-        
-        const entry = entries[0];
-        const newWidth = entry.contentRect.width;
-
-        // Ignore if width hasn't changed significantly (prevents loops when height changes due to content reflow)
-        if (this._lastWidth && Math.abs(this._lastWidth - newWidth) < 2) return;
-        this._lastWidth = newWidth;
-
-        this._detectBadgeSlot();
-        
-        if (this._config.display_mode === 'marquee') {
-            // Debounce the heavy logic
-            if (this._resizeTimer) clearTimeout(this._resizeTimer);
-            this._resizeTimer = setTimeout(() => {
+    // Debounced resize handler to prevent rapid successive calls
+    this._resizeDebounceTimer = null;
+    this._resizeObserver = new ResizeObserver(() => {
+        // Debounce resize handling to prevent crash-inducing rapid calls
+        if (this._resizeDebounceTimer) clearTimeout(this._resizeDebounceTimer);
+        this._resizeDebounceTimer = setTimeout(() => {
+            this._detectBadgeSlot();
+            if (this._config.display_mode === 'marquee') {
                 this._resetTicker();
                 this._checkMarqueeOverflow();
-            }, 200);
-        }
+            }
+        }, 100);
     });
-
     this._resizeObserver.observe(this);
     this._resetTicker();
     
@@ -213,7 +199,13 @@ class HkiNotificationCard extends LitElement {
         className.includes('badge') ||
         slot.includes('badge') ||
         tagName === 'hui-badge' ||
-        className.includes('header') && className.includes('slot')
+        className.includes('header') && className.includes('slot') ||
+        // Detect when nested inside hki-header-card or other custom parent cards
+        // This prevents JS-based marquee animation which causes crashes when nested
+        tagName === 'hki-header-card' ||
+        tagName.startsWith('hki-') ||
+        // Also detect common card wrapper patterns
+        (tagName.includes('card') && tagName !== 'ha-card' && element !== this)
       ) {
         this._isInBadgeSlot = true;
         return;
@@ -230,8 +222,8 @@ class HkiNotificationCard extends LitElement {
     super.disconnectedCallback();
     this._stopTicker();
     this._stopMarquee();
+    if (this._resizeDebounceTimer) clearTimeout(this._resizeDebounceTimer);
     if (this._resizeObserver) this._resizeObserver.disconnect();
-    if (this._resizeTimer) clearTimeout(this._resizeTimer);
     window.removeEventListener("mousemove", this._boundMouseMove);
     window.removeEventListener("mouseup", this._boundMouseUp);
   }
@@ -532,7 +524,7 @@ class HkiNotificationCard extends LitElement {
     if (!action) return "Perform action";
     
     if (action.action === "navigate" && action.navigation_path) {
-      return `Maps to ${action.navigation_path}`;
+      return `Navigate to ${action.navigation_path}`;
     }
     if (action.action === "url" && action.url_path) {
       return `Open ${action.url_path}`;
@@ -613,6 +605,9 @@ class HkiNotificationCard extends LitElement {
     const content = this.shadowRoot?.querySelector('.marquee-content');
     if (!container || !content) return;
     
+    // Guard: Don't check if container has no width yet (still rendering)
+    if (container.clientWidth === 0) return;
+    
     // Get width of just the original content (not duplicates)
     const pills = content.querySelectorAll('.pill');
     const messageCount = this._getMessages().length;
@@ -630,8 +625,14 @@ class HkiNotificationCard extends LitElement {
     
     const needsDuplicate = originalWidth > container.clientWidth;
     
+    // Only update if truly changed - prevents re-render loops
     if (needsDuplicate !== this._marqueeNeedsDuplicate) {
+      // Use a flag to prevent immediate re-checks after update
+      if (this._overflowCheckInProgress) return;
+      this._overflowCheckInProgress = true;
       this._marqueeNeedsDuplicate = needsDuplicate;
+      // Clear the flag after the render cycle completes
+      requestAnimationFrame(() => { this._overflowCheckInProgress = false; });
     }
   }
 

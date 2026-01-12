@@ -1012,6 +1012,9 @@ class HkiNotificationCard extends LitElement {
       const pillPaddingY = computedStyle.getPropertyValue('--hki-notify-pill-padding-y').trim();
       const pillRadius = computedStyle.getPropertyValue('--hki-notify-pill-radius').trim();
       const pillBlur = computedStyle.getPropertyValue('--hki-notify-pill-blur').trim();
+      const pillBorderStyle = computedStyle.getPropertyValue('--hki-notify-pill-border-style').trim();
+      const pillBorderWidth = computedStyle.getPropertyValue('--hki-notify-pill-border-width').trim();
+      const pillBorderColor = computedStyle.getPropertyValue('--hki-notify-pill-border-color').trim();
       
       // Only return values if they're actually set
       const result = {};
@@ -1029,6 +1032,9 @@ class HkiNotificationCard extends LitElement {
         if (pillPaddingY && pillPaddingY !== '') result.pillPaddingY = pillPaddingY;
         if (pillRadius && pillRadius !== '') result.pillRadius = pillRadius;
         if (pillBlur && pillBlur !== '') result.pillBlur = pillBlur;
+        if (pillBorderStyle && pillBorderStyle !== '') result.pillBorderStyle = pillBorderStyle;
+        if (pillBorderWidth && pillBorderWidth !== '') result.pillBorderWidth = pillBorderWidth;
+        if (pillBorderColor && pillBorderColor !== '') result.pillBorderColor = pillBorderColor;
       }
       
       return Object.keys(result).length > 0 ? result : null;
@@ -1167,6 +1173,9 @@ class HkiNotificationCard extends LitElement {
     let backdropBlur = 'blur(12px)';
     let pillPadding = null;
     let borderRadius = msg.border_radius ?? c.border_radius;
+    let pillBorderStyle = null;
+    let pillBorderWidth = null;
+    let pillBorderColor = null;
     
     if (useHeaderStyling && headerStyles?.pillEnabled) {
       // Use header card's pill styling
@@ -1178,6 +1187,12 @@ class HkiNotificationCard extends LitElement {
         y: headerStyles.pillPaddingY || '6px'
       };
       borderRadius = parseInt(headerStyles.pillRadius) || borderRadius;
+      // Pill border styles
+      if (headerStyles.pillBorderStyle && headerStyles.pillBorderStyle !== 'none') {
+        pillBorderStyle = headerStyles.pillBorderStyle;
+        pillBorderWidth = headerStyles.pillBorderWidth || '0px';
+        pillBorderColor = headerStyles.pillBorderColor || 'rgba(255,255,255,0.1)';
+      }
     } else if (!showBg) {
       bgColor = "transparent";
     } else if (c.bg_opacity !== undefined && c.bg_opacity < 1) {
@@ -1189,7 +1204,11 @@ class HkiNotificationCard extends LitElement {
     const fontSize = msg.font_size || (useHeaderStyling && headerStyles?.fontSize) || c.font_size;
     const fontWeight = msg.font_weight ? this._getFontWeight(msg.font_weight) : ((useHeaderStyling && headerStyles?.fontWeight) || this._getFontWeight(c.font_weight));
     const fontFamily = msg.font_family || (useHeaderStyling && headerStyles?.fontFamily) || this._getEffectiveFontFamily();
-    const borderWidth = showBg ? (msg.border_width ?? c.border_width) : 0;
+    
+    // Use header pill border or notification card's own border
+    const effectiveBorderWidth = pillBorderWidth ? parseInt(pillBorderWidth) : (showBg ? (msg.border_width ?? c.border_width) : 0);
+    const effectiveBorderColor = pillBorderColor || (showBg ? borderColor : 'transparent');
+    const effectiveBorderStyle = pillBorderStyle || 'solid';
     const boxShadow = showBg ? (msg.box_shadow || c.box_shadow) : "none";
 
     const msgAlignment = msg.alignment || c.alignment || "left";
@@ -1198,8 +1217,9 @@ class HkiNotificationCard extends LitElement {
         `--pill-color: ${textColor}`,
         `--pill-icon-color: ${iconColor}`,
         `--pill-bg: ${bgColor}`,
-        `--pill-border-color: ${showBg ? borderColor : 'transparent'}`,
-        `--pill-border-width: ${borderWidth}px`,
+        `--pill-border-color: ${effectiveBorderColor}`,
+        `--pill-border-width: ${effectiveBorderWidth}px`,
+        `--pill-border-style: ${effectiveBorderStyle}`,
         `--pill-radius: ${borderRadius}px`,
         `--pill-shadow: ${boxShadow}`,
         `--pill-backdrop: ${showBg ? backdropBlur : 'none'}`,
@@ -1712,7 +1732,9 @@ class HkiNotificationCard extends LitElement {
         gap: 8px; 
         flex-shrink: 0; 
         background: var(--pill-bg); 
-        border: var(--pill-border-width) solid var(--pill-border-color); 
+        border-style: var(--pill-border-style, solid);
+        border-width: var(--pill-border-width);
+        border-color: var(--pill-border-color); 
         border-radius: var(--pill-radius); 
         box-shadow: var(--pill-shadow); 
         padding: 8px 16px; 

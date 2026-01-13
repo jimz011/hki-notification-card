@@ -1,11 +1,11 @@
 /* HKI Notification Card
- * Version: 1.0.3
+ * Version: 1.0.4
  */
 
 const CARD_NAME = "hki-notification-card";
 
 console.info(
-  '%c HKI-NOTIFICATION-CARD %c v1.0.3 ',
+  '%c HKI-NOTIFICATION-CARD %c v1.0.4 ',
   'color: white; background: #5a007a; font-weight: bold;',
   'color: #5a007a; background: white; font-weight: bold;'
 );
@@ -1105,48 +1105,28 @@ class HkiNotificationCard extends LitElement {
     if (!container || !content) return;
     
     const messages = this._getMessages();
-    const messageCount = messages.length;
-    if (messageCount === 0) return;
+    if (messages.length === 0) return;
     
-    // Use getBoundingClientRect for more reliable measurement in flex containers
-    const containerRect = container.getBoundingClientRect();
-    const containerWidth = containerRect.width;
-    
-    // If container has no width yet, retry later
-    if (containerWidth === 0) {
-      if (this._isInBadgeSlot) {
-        setTimeout(() => this._checkMarqueeOverflow(), 100);
-      }
-      return;
-    }
-    
+    // Wait for pills to be rendered
     const pills = content.querySelectorAll('.pill');
     if (pills.length === 0) {
-      if (this._isInBadgeSlot) {
-        setTimeout(() => this._checkMarqueeOverflow(), 100);
-      }
+      setTimeout(() => this._checkMarqueeOverflow(), 100);
       return;
     }
     
-    // Calculate original content width (only count the original messages, not duplicates)
-    let originalWidth = 0;
-    const pillCount = Math.min(pills.length, messageCount);
-    for (let i = 0; i < pillCount; i++) {
-      const pillRect = pills[i].getBoundingClientRect();
-      if (pillRect.width === 0) {
-        // Pills not fully rendered yet, retry
-        if (this._isInBadgeSlot) {
-          setTimeout(() => this._checkMarqueeOverflow(), 100);
-        }
-        return;
-      }
-      originalWidth += pillRect.width;
-    }
-    const gap = parseFloat(this._config.marquee_gap) || 16;
-    originalWidth += gap * Math.max(0, messageCount - 1); // gaps between messages
+    // Use scrollWidth vs clientWidth - most reliable overflow detection
+    // If content is wider than container, we need to duplicate for seamless scrolling
+    const containerWidth = container.clientWidth;
+    const contentWidth = content.scrollWidth;
     
-    // Only duplicate if content overflows container (with small buffer for rounding)
-    const needsDuplicate = originalWidth > (containerWidth - 5);
+    // If container has no width yet (not laid out), retry
+    if (containerWidth === 0) {
+      setTimeout(() => this._checkMarqueeOverflow(), 100);
+      return;
+    }
+    
+    // Need duplicate if content overflows (with small buffer for rounding)
+    const needsDuplicate = contentWidth > (containerWidth + 5);
     
     if (needsDuplicate !== this._marqueeNeedsDuplicate) {
       this._marqueeNeedsDuplicate = needsDuplicate;

@@ -1,11 +1,11 @@
 /* HKI Notification Card
- * Version: 1.0.2
+ * Version: 1.0.3
  */
 
 const CARD_NAME = "hki-notification-card";
 
 console.info(
-  '%c HKI-NOTIFICATION-CARD %c v1.0.2 ',
+  '%c HKI-NOTIFICATION-CARD %c v1.0.3 ',
   'color: white; background: #5a007a; font-weight: bold;',
   'color: #5a007a; background: white; font-weight: bold;'
 );
@@ -226,6 +226,14 @@ class HkiNotificationCard extends LitElement {
       // Allow CSS variables time to cascade from parent
       setTimeout(() => this.requestUpdate(), 10);
       setTimeout(() => this.requestUpdate(), 100);
+    }
+    
+    // For marquee in badge slot, we need to check overflow after pills are rendered
+    if (this._config?.display_mode === 'marquee' && this._isInBadgeSlot) {
+      // Multiple checks to ensure pills are measured after layout
+      setTimeout(() => this._checkMarqueeOverflow(), 50);
+      setTimeout(() => this._checkMarqueeOverflow(), 200);
+      setTimeout(() => this._checkMarqueeOverflow(), 500);
     }
   }
 
@@ -1100,24 +1108,50 @@ class HkiNotificationCard extends LitElement {
     const messageCount = messages.length;
     if (messageCount === 0) return;
     
+    // Use getBoundingClientRect for more reliable measurement in flex containers
+    const containerRect = container.getBoundingClientRect();
+    const containerWidth = containerRect.width;
+    
+    // If container has no width yet, retry later
+    if (containerWidth === 0) {
+      if (this._isInBadgeSlot) {
+        setTimeout(() => this._checkMarqueeOverflow(), 100);
+      }
+      return;
+    }
+    
     const pills = content.querySelectorAll('.pill');
-    if (pills.length === 0 || container.clientWidth === 0) return;
+    if (pills.length === 0) {
+      if (this._isInBadgeSlot) {
+        setTimeout(() => this._checkMarqueeOverflow(), 100);
+      }
+      return;
+    }
     
     // Calculate original content width (only count the original messages, not duplicates)
     let originalWidth = 0;
     const pillCount = Math.min(pills.length, messageCount);
     for (let i = 0; i < pillCount; i++) {
-      if (pills[i].offsetWidth === 0) return; // Not rendered yet
-      originalWidth += pills[i].offsetWidth;
+      const pillRect = pills[i].getBoundingClientRect();
+      if (pillRect.width === 0) {
+        // Pills not fully rendered yet, retry
+        if (this._isInBadgeSlot) {
+          setTimeout(() => this._checkMarqueeOverflow(), 100);
+        }
+        return;
+      }
+      originalWidth += pillRect.width;
     }
     const gap = parseFloat(this._config.marquee_gap) || 16;
-    originalWidth += gap * (messageCount - 1); // gaps between messages
+    originalWidth += gap * Math.max(0, messageCount - 1); // gaps between messages
     
-    // Only duplicate if content overflows container
-    const needsDuplicate = originalWidth > container.clientWidth;
+    // Only duplicate if content overflows container (with small buffer for rounding)
+    const needsDuplicate = originalWidth > (containerWidth - 5);
     
     if (needsDuplicate !== this._marqueeNeedsDuplicate) {
       this._marqueeNeedsDuplicate = needsDuplicate;
+      // Force re-render to apply the change
+      this.requestUpdate();
     }
   }
 

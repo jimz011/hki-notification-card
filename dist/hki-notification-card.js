@@ -1,6 +1,14 @@
 /* HKI Notification Card
- * Version: 18.3.1 (Per-Notification Confirmation Override)
+ * Version: 18.4.0 (Integration Sync & Per-Notification Styling)
  */
+
+const CARD_NAME = "hki-notification-card";
+
+console.info(
+  '%c HKI-NOTIFICATION-CARD %c v18.4.0 ',
+  'color: white; background: #5a007a; font-weight: bold;',
+  'color: #5a007a; background: white; font-weight: bold;'
+);
 
 const _getLit = () => {
   const base =
@@ -58,7 +66,8 @@ class HkiNotificationCard extends LitElement {
       display_mode: "ticker",
       show_icon: true,
       interval: 3,
-      auto_cycle: true
+      auto_cycle: true,
+      use_header_styling: false
     };
   }
 
@@ -90,11 +99,17 @@ class HkiNotificationCard extends LitElement {
     this._lastMsgCount = -1;
     this._lastMsgJSON = "";
     this._isInBadgeSlot = false;
+    this._isInHeaderCard = false;
     this._popupOpen = false;
     this._popupPillSwipe = null;
     this._swipeHandlers = {};
     this._marqueeNeedsDuplicate = false;
     this._confirmationPending = null;
+    // CSS animation drag tracking
+    this._cssScrollOffset = 0;
+    this._cssDragOffset = 0;
+    // Popup portal container
+    this._popupPortal = null;
   }
 
   setConfig(config) {
@@ -116,11 +131,16 @@ class HkiNotificationCard extends LitElement {
       direction: "right",
       alignment: "left",
       full_width: false,
+      // Header card integration - Disabled by default
+      use_header_styling: false,
+      // Appearance
       show_icon: true,
       icon_after: false,
       text_color: "var(--primary-text-color)",
       icon_color: "var(--primary-text-color)",
       bg_color: "rgba(var(--rgb-card-background-color, 30, 30, 30), 0.85)",
+      bg_opacity: 1,
+      show_background: true,
       border_color: "rgba(255,255,255,0.08)",
       border_width: 1,
       border_radius: 99,
@@ -143,6 +163,7 @@ class HkiNotificationCard extends LitElement {
       button_show_badge: true,
       button_badge_color: "#ff4444",
       button_badge_text_color: "#ffffff",
+      button_badge_size: 0, // 0 = auto (scales with button_size)
       // Pill button options (when label_position is "inside")
       button_pill_size: 14,
       button_pill_full_width: false,
@@ -165,12 +186,21 @@ class HkiNotificationCard extends LitElement {
     this._resizeObserver = new ResizeObserver(() => {
         this._detectBadgeSlot();
         if (this._config.display_mode === 'marquee') {
-            this._resetTicker();
-            this._checkMarqueeOverflow();
+            if (this._isInBadgeSlot) {
+                this._checkMarqueeOverflow();
+            } else {
+                this._resetTicker();
+                this._checkMarqueeOverflow();
+            }
         }
     });
     this._resizeObserver.observe(this);
     this._resetTicker();
+    
+    if (this._config?.display_mode === 'marquee') {
+        setTimeout(() => this._checkMarqueeOverflow(), 100);
+        setTimeout(() => this._checkMarqueeOverflow(), 500);
+    }
     
     this._boundMouseMove = this._onMove.bind(this);
     this._boundMouseUp = this._onEnd.bind(this);
@@ -183,17 +213,25 @@ class HkiNotificationCard extends LitElement {
     let depth = 0;
     const maxDepth = 15;
     
+    this._isInHeaderCard = false;
+    
     while (element && depth < maxDepth) {
       const tagName = element.tagName?.toLowerCase() || '';
       const className = element.className || '';
       const slot = element.getAttribute?.('slot') || '';
+      
+      if (tagName === 'hki-header-card') {
+        this._isInBadgeSlot = true;
+        this._isInHeaderCard = true;
+        return;
+      }
       
       if (
         tagName.includes('badge') ||
         className.includes('badge') ||
         slot.includes('badge') ||
         tagName === 'hui-badge' ||
-        className.includes('header') && className.includes('slot')
+        (className.includes('header') && className.includes('slot'))
       ) {
         this._isInBadgeSlot = true;
         return;
@@ -213,6 +251,7 @@ class HkiNotificationCard extends LitElement {
     if (this._resizeObserver) this._resizeObserver.disconnect();
     window.removeEventListener("mousemove", this._boundMouseMove);
     window.removeEventListener("mouseup", this._boundMouseUp);
+    this._removePopupPortal();
   }
 
   _stopTicker() {
@@ -314,7 +353,18 @@ class HkiNotificationCard extends LitElement {
     if (container) this._scrollPos = container.scrollLeft;
     
     const content = this.shadowRoot?.querySelector('.marquee-content');
-    if (content) content.classList.add('paused');
+    if (content) {
+        content.classList.add('paused');
+        
+        if (this._isInBadgeSlot && this._config.display_mode === 'marquee') {
+            const computedStyle = window.getComputedStyle(content);
+            const matrix = new DOMMatrix(computedStyle.transform);
+            this._cssScrollOffset = matrix.m41; 
+            this._cssDragOffset = this._cssScrollOffset;
+            content.style.animation = 'none';
+            content.style.transform = `translateX(${this._cssScrollOffset}px)`;
+        }
+    }
   }
 
   _onMove(e) {
@@ -328,12 +378,22 @@ class HkiNotificationCard extends LitElement {
     if (diffX > 5 || diffY > 5) {
         this._isDragging = true;
         this._wasDragged = true;
-        if (this._config.display_mode === "marquee" && !this._isInBadgeSlot) {
-             const container = this.shadowRoot?.querySelector('.marquee-container');
-             if (container) {
-                 const deltaX = x - this._dragStart.x;
-                 container.scrollLeft = this._scrollPos - deltaX;
-             }
+        if (this._config.display_mode === "marquee") {
+            if (this._isInBadgeSlot) {
+                const content = this.shadowRoot?.querySelector('.marquee-content');
+                if (content) {
+                    const deltaX = x - this._dragStart.x;
+                    const currentOffset = this._cssScrollOffset || 0;
+                    this._cssDragOffset = currentOffset + deltaX;
+                    content.style.transform = `translateX(${this._cssDragOffset}px)`;
+                }
+            } else {
+                const container = this.shadowRoot?.querySelector('.marquee-container');
+                if (container) {
+                    const deltaX = x - this._dragStart.x;
+                    container.scrollLeft = this._scrollPos - deltaX;
+                }
+            }
         }
     }
   }
@@ -348,6 +408,24 @@ class HkiNotificationCard extends LitElement {
     this._isDragging = false;
 
     if (this._config.display_mode === "marquee") {
+        if (this._isInBadgeSlot) {
+            const content = this.shadowRoot?.querySelector('.marquee-content');
+            if (content) {
+                this._cssScrollOffset = this._cssDragOffset || 0;
+                this._marqueeResumeTimer = setTimeout(() => { 
+                    this._isPaused = false;
+                    if (content) {
+                        content.style.transform = '';
+                        content.style.animation = '';
+                        content.classList.remove('paused');
+                        this._cssScrollOffset = 0;
+                        this._cssDragOffset = 0;
+                    }
+                }, 3000);
+            }
+            return;
+        }
+        
         const container = this.shadowRoot?.querySelector('.marquee-container');
         if (container) this._scrollPos = container.scrollLeft;
         
@@ -376,19 +454,13 @@ class HkiNotificationCard extends LitElement {
   _handleClick(msg, e) {
     if (this._wasDragged) { this._wasDragged = false; return; }
     
-    // If tap_action_popup_only is enabled, always open popup (ignore service call tap_actions)
     if (this._config.tap_action_popup_only && this._config.popup_enabled !== false && msg._real !== false) {
       this._openPopup();
       return;
     }
     
-    // If message has custom tap_action
     if (msg.tap_action) {
-      // Check if confirmation is needed:
-      // 1. Per-notification 'confirm' overrides card setting
-      // 2. Fall back to card's global confirm_tap_action
       const needsConfirm = msg.confirm !== undefined ? msg.confirm : this._config.confirm_tap_action;
-      
       if (needsConfirm) {
         this._confirmationPending = msg;
         return;
@@ -397,17 +469,14 @@ class HkiNotificationCard extends LitElement {
       return;
     }
     
-    // Default action: open popup (if enabled and not a fake message)
     if (this._config.popup_enabled !== false && msg._real !== false) {
       this._openPopup();
     }
   }
 
-  // --- UPDATED TAP ACTION LOGIC ---
   _executeTapAction(action) {
     if (!action) return;
 
-    // 1. Navigation
     if (action.action === "navigate" && action.navigation_path) {
       history.pushState(null, "", action.navigation_path);
       const event = new Event("location-changed", { bubbles: true, composed: true });
@@ -415,43 +484,34 @@ class HkiNotificationCard extends LitElement {
       return;
     } 
     
-    // 2. URL
     if (action.action === "url" && action.url_path) {
       window.open(action.url_path, "_blank");
       return;
     }
     
-    // 3. Popup
     if (action.action === "popup") {
       this._openPopup();
       return;
     }
 
-    // 4. Service Call (Universal Handler)
-    // Detects 'call-service', 'perform-action', or just a service string 'domain.service'
     let serviceName = null;
     
     if (action.service) {
       serviceName = action.service;
     } else if (typeof action.action === "string" && action.action.includes(".")) {
-      // Handle modern 'action: light.toggle'
       serviceName = action.action;
     } else if (action.action === "call-service" || action.action === "perform-action") {
-      // Fallback if 'service' wasn't set but type is declared
-      // We assume data might contain the service if it was malformed, but usually 'service' is required here.
       if (action.service) serviceName = action.service;
     }
 
     if (serviceName) {
       const [domain, service] = serviceName.split(".");
       if (domain && service) {
-        // Merge all possible data locations (legacy 'data', modern 'target', 'service_data')
         const serviceData = { 
           ...(action.data || {}), 
           ...(action.service_data || {}), 
           ...(action.target || {}) 
         };
-        
         this.hass.callService(domain, service, serviceData);
       }
     }
@@ -459,11 +519,354 @@ class HkiNotificationCard extends LitElement {
 
   _openPopup() {
     this._popupOpen = true;
+    this._createPopupPortal();
   }
 
   _closePopup(e) {
     if (e) e.stopPropagation();
     this._popupOpen = false;
+    this._removePopupPortal();
+  }
+
+  _removePopupPortal() {
+    if (this._popupPortal) {
+      this._popupPortal.remove();
+      this._popupPortal = null;
+    }
+  }
+
+  _createPopupPortal() {
+    this._removePopupPortal();
+    
+    const messages = this._getMessages();
+    const realMessages = messages.filter(m => m._real !== false);
+    const count = realMessages.length;
+    const c = this._config;
+    
+    const portal = document.createElement('div');
+    portal.className = 'hki-notification-popup-portal';
+    portal.innerHTML = `
+      <style>
+        .hki-notification-popup-portal {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.6);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 9999;
+          backdrop-filter: blur(4px);
+          -webkit-backdrop-filter: blur(4px);
+        }
+        .hki-popup-container {
+          background: var(--card-background-color, #1c1c1c);
+          border-radius: 16px;
+          min-width: 320px;
+          max-width: 90vw;
+          max-height: 80vh;
+          display: flex;
+          flex-direction: column;
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+          overflow: hidden;
+        }
+        .hki-popup-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 16px 20px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .hki-popup-title {
+          font-size: 18px;
+          font-weight: 600;
+          color: var(--primary-text-color);
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .hki-popup-count-badge {
+          min-width: 22px;
+          height: 22px;
+          padding: 0 6px;
+          border-radius: 11px;
+          background: rgba(255, 255, 255, 0.15);
+          color: var(--primary-text-color);
+          font-size: 12px;
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-sizing: border-box;
+        }
+        .hki-popup-close-btn {
+          background: transparent;
+          border: none;
+          border-radius: 50%;
+          width: 36px;
+          height: 36px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: background 0.2s;
+          color: var(--primary-text-color);
+          opacity: 0.7;
+        }
+        .hki-popup-close-btn:hover {
+          background: rgba(255, 255, 255, 0.1);
+          opacity: 1;
+        }
+        .hki-popup-close-btn ha-icon {
+          --mdc-icon-size: 20px;
+        }
+        .hki-popup-content {
+          flex: 1;
+          overflow-y: auto;
+          padding: 12px 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .hki-popup-empty {
+          text-align: center;
+          padding: 32px;
+          color: var(--secondary-text-color);
+        }
+        .hki-popup-footer {
+          padding: 12px 16px;
+          border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .hki-popup-clear-all-btn {
+          width: 100%;
+          background: rgba(255, 255, 255, 0.1);
+          border: none;
+          border-radius: 8px;
+          padding: 12px;
+          color: var(--primary-text-color);
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+        .hki-popup-clear-all-btn:hover {
+          background: rgba(255, 255, 255, 0.15);
+        }
+        .hki-popup-pill-wrapper {
+          position: relative;
+          overflow: hidden;
+        }
+        .hki-popup-pill-swipe-bg {
+          position: absolute;
+          right: 0;
+          top: 0;
+          bottom: 0;
+          width: 80px;
+          background: #ff4444;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          visibility: hidden;
+          opacity: 0;
+          border-radius: 12px;
+          z-index: 1;
+        }
+        .hki-popup-pill-swipe-bg ha-icon {
+          --mdc-icon-size: 24px;
+        }
+        .hki-popup-pill {
+          box-sizing: border-box;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          width: 100%;
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 12px;
+          padding: 12px 16px;
+          padding-right: 70px;
+          position: relative;
+          z-index: 2;
+          transition: transform 0.2s ease-out;
+        }
+        .hki-popup-pill.clickable {
+          cursor: pointer;
+          padding-right: 90px;
+        }
+        .hki-popup-pill.clickable:hover {
+          filter: brightness(1.1);
+        }
+        .hki-popup-pill .icon {
+          color: var(--primary-text-color);
+          --mdc-icon-size: 20px;
+          flex-shrink: 0;
+        }
+        .hki-popup-pill .icon.spinning {
+          animation: hki-spin 2s linear infinite;
+        }
+        @keyframes hki-spin { 100% { transform: rotate(360deg); } }
+        .hki-popup-pill .text {
+          color: var(--primary-text-color);
+          font-size: 14px;
+          font-weight: 500;
+          flex: 1;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .hki-popup-pill .action-indicator {
+          position: absolute;
+          right: 36px;
+          top: 50%;
+          transform: translateY(-50%);
+          --mdc-icon-size: 18px;
+          color: var(--primary-text-color);
+          opacity: 0.5;
+        }
+        .hki-popup-pill .dismiss-btn {
+          position: absolute;
+          right: 8px;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 24px;
+          height: 24px;
+          color: var(--primary-text-color);
+          opacity: 0.5;
+          cursor: pointer;
+          background: none;
+          border: none;
+          padding: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 50%;
+          transition: opacity 0.2s, background 0.2s;
+        }
+        .hki-popup-pill .dismiss-btn:hover {
+          opacity: 1;
+          background: rgba(255,255,255,0.1);
+        }
+        .hki-popup-pill .dismiss-btn ha-icon {
+          --mdc-icon-size: 16px;
+        }
+      </style>
+      <div class="hki-popup-container">
+        <div class="hki-popup-header">
+          <span class="hki-popup-title">
+            ${c.popup_title || 'Notifications'}
+            <span class="hki-popup-count-badge">${count}</span>
+          </span>
+          <button class="hki-popup-close-btn">
+            <ha-icon icon="mdi:close"></ha-icon>
+          </button>
+        </div>
+        <div class="hki-popup-content">
+          ${realMessages.length > 0 ? realMessages.map(msg => this._renderPopupPillHTML(msg)).join('') : `
+            <div class="hki-popup-empty">No notifications</div>
+          `}
+        </div>
+        ${realMessages.length > 0 ? `
+          <div class="hki-popup-footer">
+            <button class="hki-popup-clear-all-btn">Clear All</button>
+          </div>
+        ` : ''}
+      </div>
+    `;
+    
+    portal.addEventListener('click', (e) => {
+      if (e.target === portal) {
+        this._closePopup();
+      }
+    });
+    
+    const closeBtn = portal.querySelector('.hki-popup-close-btn');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._closePopup();
+      });
+    }
+    
+    const clearAllBtn = portal.querySelector('.hki-popup-clear-all-btn');
+    if (clearAllBtn) {
+      clearAllBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._clearAllNotifications(e);
+      });
+    }
+    
+    const dismissBtns = portal.querySelectorAll('.dismiss-btn');
+    dismissBtns.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const msgId = btn.dataset.msgId;
+        if (msgId) {
+          this._dismissNotification(msgId, e);
+          setTimeout(() => {
+            if (this._popupOpen) {
+              this._createPopupPortal();
+            }
+          }, 100);
+        }
+      });
+    });
+    
+    const pills = portal.querySelectorAll('.hki-popup-pill.clickable');
+    pills.forEach(pill => {
+      pill.addEventListener('click', (e) => {
+        if (e.target.closest('.dismiss-btn')) return;
+        const msgIndex = pill.dataset.msgIndex;
+        if (msgIndex !== undefined) {
+          const msg = realMessages[parseInt(msgIndex)];
+          if (msg?.tap_action) {
+            const needsConfirm = msg.confirm !== undefined ? msg.confirm : this._config.confirm_tap_action;
+            if (needsConfirm) {
+              this._confirmationPending = msg;
+              this._closePopup();
+              this.requestUpdate();
+            } else {
+              this._executeTapAction(msg.tap_action);
+            }
+          }
+        }
+      });
+    });
+    
+    document.body.appendChild(portal);
+    this._popupPortal = portal;
+  }
+
+  _renderPopupPillHTML(msg) {
+    const icon = msg.icon || "mdi:bell";
+    const showIcon = msg.show_icon !== undefined ? msg.show_icon : (this._config.show_icon !== false);
+    const iconAfter = !!this._config.icon_after;
+    const spinIcon = msg.icon_spin === true;
+    const hasAction = !!msg.tap_action;
+    const isRealMsg = msg._real !== false;
+    const messages = this._getMessages().filter(m => m._real !== false);
+    const msgIndex = messages.indexOf(msg);
+    
+    return `
+      <div class="hki-popup-pill-wrapper">
+        <div class="hki-popup-pill-swipe-bg">
+          <ha-icon icon="mdi:delete"></ha-icon>
+        </div>
+        <div class="hki-popup-pill ${hasAction ? 'clickable' : ''}" data-msg-index="${msgIndex}">
+          ${showIcon && !iconAfter ? `<ha-icon class="icon ${spinIcon ? 'spinning' : ''}" icon="${icon}"></ha-icon>` : ''}
+          <div class="text">${msg.message}</div>
+          ${showIcon && iconAfter ? `<ha-icon class="icon ${spinIcon ? 'spinning' : ''}" icon="${icon}"></ha-icon>` : ''}
+          ${hasAction ? `<ha-icon class="action-indicator" icon="mdi:chevron-right"></ha-icon>` : ''}
+          ${isRealMsg ? `
+            <button class="dismiss-btn" data-msg-id="${msg.id}">
+              <ha-icon icon="mdi:close"></ha-icon>
+            </button>
+          ` : ''}
+        </div>
+      </div>
+    `;
   }
 
   _handlePopupBackdropClick(e) {
@@ -494,9 +897,6 @@ class HkiNotificationCard extends LitElement {
   _handlePopupPillClick(msg) {
     if (!msg.tap_action) return;
     
-    // Check if confirmation is needed:
-    // 1. Per-notification 'confirm' overrides card setting
-    // 2. Fall back to card's global confirm_tap_action
     const needsConfirm = msg.confirm !== undefined ? msg.confirm : this._config.confirm_tap_action;
     
     if (needsConfirm) {
@@ -511,7 +911,7 @@ class HkiNotificationCard extends LitElement {
     if (!action) return "Perform action";
     
     if (action.action === "navigate" && action.navigation_path) {
-      return `Navigate to ${action.navigation_path}`;
+      return `Maps to ${action.navigation_path}`;
     }
     if (action.action === "url" && action.url_path) {
       return `Open ${action.url_path}`;
@@ -562,6 +962,90 @@ class HkiNotificationCard extends LitElement {
     return c.font_family || FONTS[0];
   }
 
+  _getHeaderCardStyles() {
+    try {
+      const computedStyle = getComputedStyle(this);
+      const fontSize = computedStyle.getPropertyValue('--hki-notify-font-size').trim();
+      const fontWeight = computedStyle.getPropertyValue('--hki-notify-font-weight').trim();
+      const color = computedStyle.getPropertyValue('--hki-notify-color').trim();
+      const iconSize = computedStyle.getPropertyValue('--hki-notify-icon-size').trim();
+      const fontFamily = computedStyle.getPropertyValue('--hki-notify-font-family').trim();
+      const fontStyle = computedStyle.getPropertyValue('--hki-notify-font-style').trim();
+      const pillEnabled = computedStyle.getPropertyValue('--hki-notify-pill-enabled').trim();
+      const pillBg = computedStyle.getPropertyValue('--hki-notify-pill-bg').trim();
+      const pillPaddingX = computedStyle.getPropertyValue('--hki-notify-pill-padding-x').trim();
+      const pillPaddingY = computedStyle.getPropertyValue('--hki-notify-pill-padding-y').trim();
+      const pillRadius = computedStyle.getPropertyValue('--hki-notify-pill-radius').trim();
+      const pillBlur = computedStyle.getPropertyValue('--hki-notify-pill-blur').trim();
+      const pillBorderStyle = computedStyle.getPropertyValue('--hki-notify-pill-border-style').trim();
+      const pillBorderWidth = computedStyle.getPropertyValue('--hki-notify-pill-border-width').trim();
+      const pillBorderColor = computedStyle.getPropertyValue('--hki-notify-pill-border-color').trim();
+      
+      const result = {};
+      if (fontSize && fontSize !== '') result.fontSize = parseInt(fontSize);
+      if (fontWeight && fontWeight !== '') result.fontWeight = fontWeight;
+      if (color && color !== '') result.color = color;
+      if (iconSize && iconSize !== '') result.iconSize = parseInt(iconSize);
+      if (fontFamily && fontFamily !== '') result.fontFamily = fontFamily;
+      if (fontStyle && fontStyle !== '') result.fontStyle = fontStyle;
+      if (pillEnabled === '1') {
+        result.pillEnabled = true;
+        if (pillBg && pillBg !== '') result.pillBg = pillBg;
+        if (pillPaddingX && pillPaddingX !== '') result.pillPaddingX = pillPaddingX;
+        if (pillPaddingY && pillPaddingY !== '') result.pillPaddingY = pillPaddingY;
+        if (pillRadius && pillRadius !== '') result.pillRadius = pillRadius;
+        if (pillBlur && pillBlur !== '') result.pillBlur = pillBlur;
+        if (pillBorderStyle && pillBorderStyle !== '') result.pillBorderStyle = pillBorderStyle;
+        if (pillBorderWidth && pillBorderWidth !== '') result.pillBorderWidth = pillBorderWidth;
+        if (pillBorderColor && pillBorderColor !== '') result.pillBorderColor = pillBorderColor;
+      }
+      
+      return Object.keys(result).length > 0 ? result : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  _applyOpacityToColor(color, opacity) {
+    if (!color || opacity >= 1) return color;
+    
+    const rgbaMatch = color.match(/rgba?\s*\(\s*([^)]+)\s*\)/i);
+    if (rgbaMatch) {
+      const parts = rgbaMatch[1].split(',').map(p => p.trim());
+      if (parts.length >= 3) {
+        const r = parts[0];
+        const g = parts[1];
+        const b = parts[2];
+        const existingAlpha = parts.length >= 4 ? parseFloat(parts[3]) : 1;
+        const newAlpha = (existingAlpha * opacity).toFixed(2);
+        return `rgba(${r}, ${g}, ${b}, ${newAlpha})`;
+      }
+    }
+    
+    if (color.startsWith('#')) {
+      const hex = color.slice(1);
+      let r, g, b;
+      if (hex.length === 3) {
+        r = parseInt(hex[0] + hex[0], 16);
+        g = parseInt(hex[1] + hex[1], 16);
+        b = parseInt(hex[2] + hex[2], 16);
+      } else if (hex.length === 6) {
+        r = parseInt(hex.slice(0, 2), 16);
+        g = parseInt(hex.slice(2, 4), 16);
+        b = parseInt(hex.slice(4, 6), 16);
+      } else {
+        return color;
+      }
+      return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+    }
+    
+    if (color.startsWith('var(')) {
+      return color; 
+    }
+    
+    return color;
+  }
+
   willUpdate(changedProps) {
     super.willUpdate(changedProps);
     if (changedProps.has("hass")) {
@@ -571,7 +1055,6 @@ class HkiNotificationCard extends LitElement {
         this._lastMsgJSON = currentJSON;
         if (this._lastMsgCount <= 0 && msgs.length > 0) this._tickerIndex = 0;
         this._lastMsgCount = msgs.length;
-        // Reset duplicate flag so it re-evaluates after render
         if (this._config?.display_mode === 'marquee') {
           this._marqueeNeedsDuplicate = false;
         }
@@ -592,18 +1075,24 @@ class HkiNotificationCard extends LitElement {
     const content = this.shadowRoot?.querySelector('.marquee-content');
     if (!container || !content) return;
     
-    // Get width of just the original content (not duplicates)
-    const pills = content.querySelectorAll('.pill');
     const messageCount = this._getMessages().length;
     if (messageCount === 0) return;
     
-    let originalWidth = 0;
+    if (this._isInBadgeSlot) {
+      if (!this._marqueeNeedsDuplicate) {
+        this._marqueeNeedsDuplicate = true;
+      }
+      return;
+    }
     
-    // Calculate width of original messages only
+    const pills = content.querySelectorAll('.pill');
+    if (pills.length === 0 || container.clientWidth === 0) return;
+    
+    let originalWidth = 0;
     for (let i = 0; i < Math.min(pills.length, messageCount); i++) {
+      if (pills[i].offsetWidth === 0) return;
       originalWidth += pills[i].offsetWidth;
     }
-    // Add gaps between pills (including trailing gap for seamless loop)
     const gap = parseFloat(this._config.marquee_gap) || 16;
     originalWidth += gap * messageCount;
     
@@ -619,17 +1108,61 @@ class HkiNotificationCard extends LitElement {
     const isRealMsg = msg._real !== false; 
     const animClass = (mode === "ticker" && !isSingle && isRealMsg) ? this._animationClass : "";
 
-    const textColor = msg.text_color || msg.color_text || c.text_color;
-    const iconColor = msg.icon_color || msg.color_icon || c.icon_color;
-    const bgColor = msg.bg_color || msg.color_bg || c.bg_color;
+    let headerStyles = null;
+    const useHeaderStyling = this._isInHeaderCard && c.use_header_styling;
+    if (useHeaderStyling) {
+      headerStyles = this._getHeaderCardStyles();
+    }
+
+    const textColor = msg.text_color || msg.color_text || (useHeaderStyling && headerStyles?.color) || c.text_color;
+    const iconColor = msg.icon_color || msg.color_icon || (useHeaderStyling && headerStyles?.color) || c.icon_color;
     const borderColor = msg.border_color || msg.color_border || c.border_color;
 
-    const fontSize = msg.font_size || c.font_size;
-    const fontWeight = msg.font_weight ? this._getFontWeight(msg.font_weight) : this._getFontWeight(c.font_weight);
-    const fontFamily = msg.font_family || this._getEffectiveFontFamily();
-    const borderRadius = msg.border_radius ?? c.border_radius;
-    const borderWidth = msg.border_width ?? c.border_width;
-    const boxShadow = msg.box_shadow || c.box_shadow;
+    // Handle background & opacity
+    // 1. Check message specific override first, then card config
+    let showBg = msg.show_background !== undefined ? msg.show_background !== false : c.show_background !== false;
+    
+    let bgColor = msg.bg_color || msg.color_bg || c.bg_color;
+    let backdropBlur = 'blur(12px)';
+    let pillPadding = null;
+    let borderRadius = msg.border_radius ?? c.border_radius;
+    let pillBorderStyle = null;
+    let pillBorderWidth = null;
+    let pillBorderColor = null;
+    
+    if (useHeaderStyling && headerStyles?.pillEnabled) {
+      showBg = true;
+      bgColor = headerStyles.pillBg || bgColor;
+      backdropBlur = `blur(${headerStyles.pillBlur || '0px'})`;
+      pillPadding = {
+        x: headerStyles.pillPaddingX || '10px',
+        y: headerStyles.pillPaddingY || '6px'
+      };
+      borderRadius = parseInt(headerStyles.pillRadius) || borderRadius;
+      if (headerStyles.pillBorderStyle && headerStyles.pillBorderStyle !== 'none') {
+        pillBorderStyle = headerStyles.pillBorderStyle;
+        pillBorderWidth = headerStyles.pillBorderWidth || '0px';
+        pillBorderColor = headerStyles.pillBorderColor || 'rgba(255,255,255,0.1)';
+      }
+    } else if (!showBg) {
+      bgColor = "transparent";
+    } else {
+        // Apply Opacity
+        const opacityVal = msg.bg_opacity !== undefined ? msg.bg_opacity : c.bg_opacity;
+        if (opacityVal !== undefined && opacityVal < 1) {
+            const opacity = Math.max(0, Math.min(1, parseFloat(opacityVal) || 1));
+            bgColor = this._applyOpacityToColor(bgColor, opacity);
+        }
+    }
+
+    const fontSize = msg.font_size || (useHeaderStyling && headerStyles?.fontSize) || c.font_size;
+    const fontWeight = msg.font_weight ? this._getFontWeight(msg.font_weight) : ((useHeaderStyling && headerStyles?.fontWeight) || this._getFontWeight(c.font_weight));
+    const fontFamily = msg.font_family || (useHeaderStyling && headerStyles?.fontFamily) || this._getEffectiveFontFamily();
+    
+    const effectiveBorderWidth = pillBorderWidth ? parseInt(pillBorderWidth) : (showBg ? (msg.border_width ?? c.border_width) : 0);
+    const effectiveBorderColor = pillBorderColor || (showBg ? borderColor : 'transparent');
+    const effectiveBorderStyle = pillBorderStyle || 'solid';
+    const boxShadow = showBg ? (msg.box_shadow || c.box_shadow) : "none";
 
     const msgAlignment = msg.alignment || c.alignment || "left";
 
@@ -637,27 +1170,39 @@ class HkiNotificationCard extends LitElement {
         `--pill-color: ${textColor}`,
         `--pill-icon-color: ${iconColor}`,
         `--pill-bg: ${bgColor}`,
-        `--pill-border-color: ${borderColor}`,
-        `--pill-border-width: ${borderWidth}px`,
+        `--pill-border-color: ${effectiveBorderColor}`,
+        `--pill-border-width: ${effectiveBorderWidth}px`,
+        `--pill-border-style: ${effectiveBorderStyle}`,
         `--pill-radius: ${borderRadius}px`,
         `--pill-shadow: ${boxShadow}`,
+        `--pill-backdrop: ${showBg ? backdropBlur : 'none'}`,
         `--pill-font-size: ${fontSize}px`,
         `--pill-font-weight: ${fontWeight}`,
         `--pill-font-family: ${fontFamily}`
-    ].join(";");
+    ];
+    
+    if (pillPadding) {
+      styles.push(`--pill-padding-x: ${pillPadding.x}`);
+      styles.push(`--pill-padding-y: ${pillPadding.y}`);
+    }
+    
+    const stylesStr = styles.join(";");
+    const useHeaderPill = useHeaderStyling && headerStyles?.pillEnabled;
 
     const icon = msg.icon || "mdi:bell";
-    const showIcon = c.show_icon !== false;
+    const showIcon = msg.show_icon !== undefined ? msg.show_icon : (c.show_icon !== false);
     const iconAfter = !!c.icon_after;
     const spinIcon = msg.icon_spin === true;
     const hasAction = !!msg.tap_action || (c.popup_enabled !== false && isRealMsg);
     const isFullWidth = c.full_width && mode !== 'marquee';
     const widthClass = isFullWidth ? "full" : "";
     const alignClass = isFullWidth ? `align-${msgAlignment}` : "";
+    const noBgClass = !showBg ? "no-bg" : "";
+    const headerPillClass = useHeaderPill ? "header-pill" : "";
 
     return html`
-        <div class="pill ${animClass} ${widthClass} ${alignClass} ${hasAction ? "clickable" : ""}" 
-             style="${styles}" 
+        <div class="pill ${animClass} ${widthClass} ${alignClass} ${noBgClass} ${headerPillClass} ${hasAction ? "clickable" : ""}" 
+             style="${stylesStr}" 
              @click=${(e) => { e.stopPropagation(); this._handleClick(msg, e); }}>
           ${showIcon && !iconAfter ? html`<ha-icon class="icon ${spinIcon ? "spinning" : ""}" .icon=${icon}></ha-icon>` : ''}
           <div class="text">${msg.message}</div>
@@ -679,12 +1224,17 @@ class HkiNotificationCard extends LitElement {
     if (c.alignment === "left") contentAlign = "flex-start";
     if (c.alignment === "right") contentAlign = "flex-end";
     
+    // Calculate badge size - if 0 (auto), scale with button size
+    const buttonSize = c.button_size || 48;
+    const badgeSize = c.button_badge_size > 0 ? c.button_badge_size : Math.max(16, Math.round(buttonSize * 0.4));
+    
     const iconButtonStyles = [
-      `--button-size: ${c.button_size || 48}px`,
+      `--button-size: ${buttonSize}px`,
       `--button-bg: ${c.button_bg_color}`,
       `--button-icon-color: ${c.button_icon_color}`,
       `--badge-color: ${c.button_badge_color}`,
       `--badge-text-color: ${c.button_badge_text_color}`,
+      `--badge-size: ${badgeSize}px`,
       `--content-align: ${contentAlign}`
     ].join(";");
     
@@ -698,6 +1248,7 @@ class HkiNotificationCard extends LitElement {
       `--button-icon-color: ${c.button_icon_color}`,
       `--badge-color: ${c.button_badge_color}`,
       `--badge-text-color: ${c.button_badge_text_color}`,
+      `--badge-size: ${badgeSize}px`,
       `--content-align: ${contentAlign}`
     ].join(";");
     
@@ -983,16 +1534,25 @@ class HkiNotificationCard extends LitElement {
     if (c.alignment === "center") alignValue = "center";
     if (c.alignment === "right") alignValue = "flex-end";
     
+    // When in header card, force list mode to marquee (list doesn't work well in header)
+    // But keep button mode available
+    if (this._isInHeaderCard && mode === 'list') {
+      mode = 'marquee';
+    }
+    
     const containerStyles = [
         `--anim-duration: ${c.animation_duration || 0.5}s`,
         `--marquee-gap: ${c.marquee_gap || 16}px`,
         `--align-value: ${alignValue}`
     ].join(";");
     
+    // Add class when in header card for badge overflow handling
+    const headerClass = this._isInHeaderCard ? 'in-header-card' : '';
+    
     if (mode === 'button') {
       this.style.display = "block";
       return html`
-        <div class="wrapper button-mode-wrapper" style="${containerStyles}">
+        <div class="wrapper button-mode-wrapper ${headerClass}" style="${containerStyles}">
           ${this._renderButton(realMessageCount)}
         </div>
         ${this._popupOpen ? this._renderPopup(messages) : ''}
@@ -1029,7 +1589,9 @@ class HkiNotificationCard extends LitElement {
     const listMaxHeight = (c.list_max_items || 3) * itemHeight;
 
     const scrollDuration = this._calculateScrollDuration(messages);
-    const useCSSAnimation = this._isInBadgeSlot && c.auto_scroll !== false;
+    // Only use CSS animation when in badge slot/nested AND duplicates are rendered
+    // The -50% translateX animation requires duplicated content to loop properly
+    const useCSSAnimation = this._isInBadgeSlot && c.auto_scroll !== false && this._marqueeNeedsDuplicate;
 
     const standardStyles = containerStyles + [
         `; --enter-x: ${startX}`, `--enter-y: ${startY}`,
@@ -1075,6 +1637,12 @@ class HkiNotificationCard extends LitElement {
         justify-content: var(--align-value, flex-start);
       }
       
+      /* When in header card, add padding to prevent badge from being clipped */
+      .wrapper.button-mode-wrapper.in-header-card {
+        padding: 8px;
+        box-sizing: border-box;
+      }
+      
       .ticker-container { display: flex; overflow: hidden; justify-content: var(--align-value, flex-start); width: 100%; }
       .marquee-container { width: 100%; overflow: hidden; white-space: nowrap; }
       
@@ -1116,14 +1684,20 @@ class HkiNotificationCard extends LitElement {
         gap: 8px; 
         flex-shrink: 0; 
         background: var(--pill-bg); 
-        border: var(--pill-border-width) solid var(--pill-border-color); 
+        border-style: var(--pill-border-style, solid);
+        border-width: var(--pill-border-width);
+        border-color: var(--pill-border-color); 
         border-radius: var(--pill-radius); 
         box-shadow: var(--pill-shadow); 
         padding: 8px 16px; 
-        backdrop-filter: blur(12px); 
-        -webkit-backdrop-filter: blur(12px); 
+        backdrop-filter: var(--pill-backdrop, blur(12px)); 
+        -webkit-backdrop-filter: var(--pill-backdrop, blur(12px)); 
         transform: translate3d(0,0,0); 
         transition: background 0.2s; 
+      }
+      /* When using header pill styling, use header's padding */
+      .pill.header-pill {
+        padding: var(--pill-padding-y, 8px) var(--pill-padding-x, 16px);
       }
       .list-container .pill:not(.popup-pill):not(.full) { width: auto; }
       .pill.full { width: 100%; }
@@ -1192,6 +1766,14 @@ class HkiNotificationCard extends LitElement {
       @keyframes spin { 100% { transform: rotate(360deg); } }
       .text { color: var(--pill-color); font-size: var(--pill-font-size); font-weight: var(--pill-font-weight); font-family: var(--pill-font-family); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; }
       
+      /* When background is hidden, add text shadow like header weather/datetime */
+      .pill.no-bg .icon {
+        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
+      }
+      .pill.no-bg .text {
+        text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+      }
+      
       .notification-pill-wrapper {
         display: inline-flex;
         align-items: center;
@@ -1203,15 +1785,15 @@ class HkiNotificationCard extends LitElement {
       
       .pill-outside-badge {
         position: absolute;
-        top: -6px;
-        right: -6px;
-        min-width: 18px;
-        height: 18px;
-        padding: 0 5px;
-        border-radius: 9px;
+        top: calc(var(--badge-size, 18px) * -0.33);
+        right: calc(var(--badge-size, 18px) * -0.33);
+        min-width: var(--badge-size, 18px);
+        height: var(--badge-size, 18px);
+        padding: 0 calc(var(--badge-size, 18px) * 0.28);
+        border-radius: calc(var(--badge-size, 18px) * 0.5);
         background: var(--badge-color, #ff4444);
         color: var(--badge-text-color, #ffffff);
-        font-size: 11px;
+        font-size: calc(var(--badge-size, 18px) * 0.6);
         font-weight: 600;
         display: flex;
         align-items: center;
@@ -1439,15 +2021,15 @@ class HkiNotificationCard extends LitElement {
       
       .button-badge {
         position: absolute;
-        top: -4px;
-        right: -4px;
-        min-width: 18px;
-        height: 18px;
-        padding: 0 5px;
-        border-radius: 9px;
+        top: calc(var(--badge-size, 18px) * -0.25);
+        right: calc(var(--badge-size, 18px) * -0.25);
+        min-width: var(--badge-size, 18px);
+        height: var(--badge-size, 18px);
+        padding: 0 calc(var(--badge-size, 18px) * 0.28);
+        border-radius: calc(var(--badge-size, 18px) * 0.5);
         background: var(--badge-color, #ff4444);
         color: var(--badge-text-color, #ffffff);
-        font-size: 11px;
+        font-size: calc(var(--badge-size, 18px) * 0.6);
         font-weight: 600;
         display: flex;
         align-items: center;
@@ -1514,13 +2096,13 @@ class HkiNotificationCard extends LitElement {
       }
       
       .pill-button-badge {
-        min-width: 18px;
-        height: 18px;
-        padding: 0 5px;
-        border-radius: 9px;
+        min-width: var(--badge-size, 18px);
+        height: var(--badge-size, 18px);
+        padding: 0 calc(var(--badge-size, 18px) * 0.28);
+        border-radius: calc(var(--badge-size, 18px) * 0.5);
         background: var(--badge-color, #ff4444);
         color: var(--badge-text-color, #ffffff);
-        font-size: 11px;
+        font-size: calc(var(--badge-size, 18px) * 0.6);
         font-weight: 600;
         display: flex;
         align-items: center;
@@ -1659,6 +2241,14 @@ class HkiNotificationCardEditor extends LitElement {
 
     return html`
       <div class="card-config">
+        <ha-alert alert-type="info">
+          <strong>Documentation</strong><br><br>
+          This card can also be placed in the header/badges section!<br><br>
+          This card can be integrated into <a href="https://github.com/jimz011/hki-header-card" target="_blank">hki-header-card</a><br><br>
+          Please read the documentation at <a href="https://github.com/jimz011/hki-notification-card" target="_blank">hki-notification-card</a> to set up this card.<br><br>
+          <em>This card may contain bugs. Use at your own risk!</em>
+        </ha-alert>
+        
         ${this._renderEntityPicker("Notification Sensor", "entity", this._config.entity, "", ["sensor"])}
 
         <h3>Behavior</h3>
@@ -1678,9 +2268,6 @@ class HkiNotificationCardEditor extends LitElement {
         ` : ''}
         
         ${mode === 'marquee' ? html`
-            <ha-alert alert-type="warning">
-              When placing this card in the header badges section, set "Badges behaviour" to "Scroll" for auto-scroll to work.
-            </ha-alert>
             <div class="side-by-side">
                 ${this._renderInput("Scroll Speed", "marquee_speed", this._config.marquee_speed, "number", "0.1")}
                 ${this._renderInput("Gap (px)", "marquee_gap", this._config.marquee_gap, "number")}
@@ -1749,6 +2336,7 @@ class HkiNotificationCardEditor extends LitElement {
                 ${this._renderColorPicker("Badge Color", "button_badge_color", this._config.button_badge_color || "#ff4444")}
                 ${this._renderColorPicker("Badge Text", "button_badge_text_color", this._config.button_badge_text_color || "#ffffff")}
               </div>
+              ${this._renderInput("Badge Size (0=auto)", "button_badge_size", this._config.button_badge_size ?? 0, "number")}
             ` : ''}
         ` : html`
             <div class="side-by-side">
@@ -1794,6 +2382,14 @@ class HkiNotificationCardEditor extends LitElement {
         </ha-alert>
         
         ${mode !== 'button' ? html`
+        <h3>Header Card Integration</h3>
+        ${this._renderSwitch("Use Header Styling", "use_header_styling", this._config.use_header_styling)}
+        ${this._config.use_header_styling ? html`
+          <ha-alert alert-type="info">
+            When inside hki-header-card, font size, weight, color, and pill styling will be inherited from the header card's Info Display settings.
+          </ha-alert>
+        ` : ''}
+        
         <h3>Appearance</h3>
         <div class="side-by-side ${mode === 'marquee' ? '' : 'three-col'}">
            ${this._renderSwitch("Show Icon", "show_icon", this._config.show_icon)}
@@ -1805,19 +2401,27 @@ class HkiNotificationCardEditor extends LitElement {
           ${["left","center","right"].map(a => html`<mwc-list-item .value=${a}>${a.charAt(0).toUpperCase() + a.slice(1)}</mwc-list-item>`)}
         </ha-select>
 
+        ${!this._config.use_header_styling ? html`
         <div class="side-by-side">
           ${this._renderColorPicker("Text Color", "text_color", this._config.text_color)}
           ${this._renderColorPicker("Icon Color", "icon_color", this._config.icon_color)}
         </div>
-        <div class="side-by-side">
-          ${this._renderColorPicker("Background", "bg_color", this._config.bg_color)}
-          ${this._renderColorPicker("Border Color", "border_color", this._config.border_color)}
-        </div>
-        ${this._renderInput("Box Shadow", "box_shadow", this._config.box_shadow)}
-        <div class="side-by-side">
+        
+        ${this._renderSwitch("Show Background", "show_background", this._config.show_background !== false)}
+        ${this._config.show_background !== false ? html`
+          <div class="side-by-side">
+            ${this._renderColorPicker("Background", "bg_color", this._config.bg_color)}
+            ${this._renderInput("BG Opacity (0-1)", "bg_opacity", this._config.bg_opacity ?? 1, "number", "0.1")}
+          </div>
+          <div class="side-by-side">
+            ${this._renderColorPicker("Border Color", "border_color", this._config.border_color)}
+            ${this._renderInput("Border Width", "border_width", this._config.border_width, "number")}
+          </div>
+          ${this._renderInput("Box Shadow", "box_shadow", this._config.box_shadow)}
           ${this._renderInput("Border Radius", "border_radius", this._config.border_radius, "number")}
-          ${this._renderInput("Border Width", "border_width", this._config.border_width, "number")}
-        </div>
+        ` : html`
+          ${this._renderInput("Border Radius", "border_radius", this._config.border_radius, "number")}
+        `}
 
         <h3>Typography</h3>
         <div class="side-by-side">
@@ -1832,6 +2436,7 @@ class HkiNotificationCardEditor extends LitElement {
         ${showCustomFont ? html`
           ${this._renderInput("Custom Font Family", "custom_font_family", this._config.custom_font_family || "", "text")}
           <p class="helper-text">Enter a CSS font-family value (e.g., "Comic Sans MS, cursive")</p>
+        ` : ''}
         ` : ''}
         ` : ''}
       </div>
@@ -1915,7 +2520,7 @@ class HkiNotificationCardEditor extends LitElement {
     const rgb = ev.detail.value;
     if (rgb && Array.isArray(rgb)) {
       const hexColor = '#' + rgb.map(c => c.toString(16).padStart(2, '0')).join('');
-      this._fireChanged({ ...this._config, [field]: hexColor });
+      this._fireChanged({ ...this._config, [field]: hexColor });a
     }
   }
 

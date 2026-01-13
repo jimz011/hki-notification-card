@@ -1,11 +1,11 @@
 /* HKI Notification Card
- * Version: 18.4.0 (Integration Sync & Per-Notification Styling)
+ * Version: 1.0.1
  */
 
 const CARD_NAME = "hki-notification-card";
 
 console.info(
-  '%c HKI-NOTIFICATION-CARD %c v18.4.0 ',
+  '%c HKI-NOTIFICATION-CARD %c v1.0.1 ',
   'color: white; background: #5a007a; font-weight: bold;',
   'color: #5a007a; background: white; font-weight: bold;'
 );
@@ -2243,6 +2243,7 @@ class HkiNotificationCardEditor extends LitElement {
       <div class="card-config">
         <ha-alert alert-type="info">
           <strong>Documentation</strong><br><br>
+          This card requires the <a href="https://github.com/jimz011/hki-notify" target="_blank">HKI Notify</a> integration to function.<br><br>
           This card can also be placed in the header/badges section!<br><br>
           This card can be integrated into <a href="https://github.com/jimz011/hki-header-card" target="_blank">hki-header-card</a><br><br>
           Please read the documentation at <a href="https://github.com/jimz011/hki-notification-card" target="_blank">hki-notification-card</a> to set up this card.<br><br>

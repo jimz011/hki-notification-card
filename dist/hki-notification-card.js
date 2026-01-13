@@ -1,11 +1,11 @@
 /* HKI Notification Card
- * Version: 1.0.1
+ * Version: 1.0.2
  */
 
 const CARD_NAME = "hki-notification-card";
 
 console.info(
-  '%c HKI-NOTIFICATION-CARD %c v1.0.1 ',
+  '%c HKI-NOTIFICATION-CARD %c v1.0.2 ',
   'color: white; background: #5a007a; font-weight: bold;',
   'color: #5a007a; background: white; font-weight: bold;'
 );
@@ -202,10 +202,31 @@ class HkiNotificationCard extends LitElement {
         setTimeout(() => this._checkMarqueeOverflow(), 500);
     }
     
+    // Force re-render after DOM connection to pick up CSS variables from parent
+    // This fixes use_header_styling and show_empty not working on initial load
+    if (this._config?.use_header_styling || this._config?.show_empty) {
+      requestAnimationFrame(() => {
+        this._detectBadgeSlot();
+        this.requestUpdate();
+        // Double-check after CSS has had time to cascade
+        setTimeout(() => this.requestUpdate(), 50);
+      });
+    }
+    
     this._boundMouseMove = this._onMove.bind(this);
     this._boundMouseUp = this._onEnd.bind(this);
     window.addEventListener("mousemove", this._boundMouseMove);
     window.addEventListener("mouseup", this._boundMouseUp);
+  }
+
+  firstUpdated() {
+    // After first render, check if we need to apply header styling
+    // CSS variables from parent need the element to be fully in DOM
+    if (this._config?.use_header_styling && this._isInHeaderCard) {
+      // Allow CSS variables time to cascade from parent
+      setTimeout(() => this.requestUpdate(), 10);
+      setTimeout(() => this.requestUpdate(), 100);
+    }
   }
 
   _detectBadgeSlot() {
@@ -1075,27 +1096,24 @@ class HkiNotificationCard extends LitElement {
     const content = this.shadowRoot?.querySelector('.marquee-content');
     if (!container || !content) return;
     
-    const messageCount = this._getMessages().length;
+    const messages = this._getMessages();
+    const messageCount = messages.length;
     if (messageCount === 0) return;
-    
-    if (this._isInBadgeSlot) {
-      if (!this._marqueeNeedsDuplicate) {
-        this._marqueeNeedsDuplicate = true;
-      }
-      return;
-    }
     
     const pills = content.querySelectorAll('.pill');
     if (pills.length === 0 || container.clientWidth === 0) return;
     
+    // Calculate original content width (only count the original messages, not duplicates)
     let originalWidth = 0;
-    for (let i = 0; i < Math.min(pills.length, messageCount); i++) {
-      if (pills[i].offsetWidth === 0) return;
+    const pillCount = Math.min(pills.length, messageCount);
+    for (let i = 0; i < pillCount; i++) {
+      if (pills[i].offsetWidth === 0) return; // Not rendered yet
       originalWidth += pills[i].offsetWidth;
     }
     const gap = parseFloat(this._config.marquee_gap) || 16;
-    originalWidth += gap * messageCount;
+    originalWidth += gap * (messageCount - 1); // gaps between messages
     
+    // Only duplicate if content overflows container
     const needsDuplicate = originalWidth > container.clientWidth;
     
     if (needsDuplicate !== this._marqueeNeedsDuplicate) {
@@ -2521,7 +2539,7 @@ class HkiNotificationCardEditor extends LitElement {
     const rgb = ev.detail.value;
     if (rgb && Array.isArray(rgb)) {
       const hexColor = '#' + rgb.map(c => c.toString(16).padStart(2, '0')).join('');
-      this._fireChanged({ ...this._config, [field]: hexColor });a
+      this._fireChanged({ ...this._config, [field]: hexColor });
     }
   }
 

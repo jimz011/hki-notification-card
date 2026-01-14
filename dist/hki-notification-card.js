@@ -1,11 +1,12 @@
 /* HKI Notification Card
- * Version: 1.0.4
+ * Version: 1.0.2
+ * Fixes: show_empty default, popup styling, timestamps, stable popup size
  */
 
 const CARD_NAME = "hki-notification-card";
 
 console.info(
-  '%c HKI-NOTIFICATION-CARD %c v1.0.4 ',
+  '%c HKI-NOTIFICATION-CARD %c v1.0.2 ',
   'color: white; background: #5a007a; font-weight: bold;',
   'color: #5a007a; background: white; font-weight: bold;'
 );
@@ -118,7 +119,8 @@ class HkiNotificationCard extends LitElement {
       entity: "", 
       attribute: "messages",
       display_mode: "ticker",
-      show_empty: false,
+      // Changed default to true to match Editor UI assumption
+      show_empty: true,
       empty_message: "No Notifications",
       auto_cycle: true, 
       auto_scroll: true,
@@ -153,6 +155,9 @@ class HkiNotificationCard extends LitElement {
       popup_enabled: true,
       tap_action_popup_only: false,
       confirm_tap_action: false,
+      // Timestamp options
+      show_list_timestamp: false,
+      show_popup_timestamp: true,
       // Button mode options
       button_icon: "mdi:bell",
       button_icon_color: "var(--primary-text-color)",
@@ -202,39 +207,10 @@ class HkiNotificationCard extends LitElement {
         setTimeout(() => this._checkMarqueeOverflow(), 500);
     }
     
-    // Force re-render after DOM connection to pick up CSS variables from parent
-    // This fixes use_header_styling and show_empty not working on initial load
-    if (this._config?.use_header_styling || this._config?.show_empty) {
-      requestAnimationFrame(() => {
-        this._detectBadgeSlot();
-        this.requestUpdate();
-        // Double-check after CSS has had time to cascade
-        setTimeout(() => this.requestUpdate(), 50);
-      });
-    }
-    
     this._boundMouseMove = this._onMove.bind(this);
     this._boundMouseUp = this._onEnd.bind(this);
     window.addEventListener("mousemove", this._boundMouseMove);
     window.addEventListener("mouseup", this._boundMouseUp);
-  }
-
-  firstUpdated() {
-    // After first render, check if we need to apply header styling
-    // CSS variables from parent need the element to be fully in DOM
-    if (this._config?.use_header_styling && this._isInHeaderCard) {
-      // Allow CSS variables time to cascade from parent
-      setTimeout(() => this.requestUpdate(), 10);
-      setTimeout(() => this.requestUpdate(), 100);
-    }
-    
-    // For marquee in badge slot, we need to check overflow after pills are rendered
-    if (this._config?.display_mode === 'marquee' && this._isInBadgeSlot) {
-      // Multiple checks to ensure pills are measured after layout
-      setTimeout(() => this._checkMarqueeOverflow(), 50);
-      setTimeout(() => this._checkMarqueeOverflow(), 200);
-      setTimeout(() => this._checkMarqueeOverflow(), 500);
-    }
   }
 
   _detectBadgeSlot() {
@@ -564,6 +540,27 @@ class HkiNotificationCard extends LitElement {
     }
   }
 
+  // Helper to format timestamps
+  _formatTime(msg) {
+    const raw = msg.time || msg.timestamp || msg.created_at || msg.date;
+    if (!raw) return "";
+    
+    // Check if it's already a formatted time string (e.g., "14:30")
+    if (typeof raw === 'string' && raw.length < 9 && raw.includes(':')) {
+        return raw;
+    }
+    
+    try {
+        const date = new Date(raw);
+        if (isNaN(date.getTime())) return String(raw);
+        
+        // Simple time format HH:MM
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+        return "";
+    }
+  }
+
   _createPopupPortal() {
     this._removePopupPortal();
     
@@ -574,6 +571,13 @@ class HkiNotificationCard extends LitElement {
     
     const portal = document.createElement('div');
     portal.className = 'hki-notification-popup-portal';
+    
+    // Fixed height popup for stability
+    const popupStyle = `
+        height: 600px;
+        max-height: 80vh; 
+    `;
+
     portal.innerHTML = `
       <style>
         .hki-notification-popup-portal {
@@ -595,11 +599,12 @@ class HkiNotificationCard extends LitElement {
           border-radius: 16px;
           min-width: 320px;
           max-width: 90vw;
-          max-height: 80vh;
+          ${popupStyle}
           display: flex;
           flex-direction: column;
           box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
           overflow: hidden;
+          transition: height 0.2s;
         }
         .hki-popup-header {
           display: flex;
@@ -630,26 +635,28 @@ class HkiNotificationCard extends LitElement {
           justify-content: center;
           box-sizing: border-box;
         }
+        /* Updated Close Button Style */
         .hki-popup-close-btn {
-          background: transparent;
-          border: none;
+          background: rgba(255, 255, 255, 0.1);
+          border: 1px solid rgba(255, 255, 255, 0.08);
           border-radius: 50%;
-          width: 36px;
-          height: 36px;
+          width: 32px;
+          height: 32px;
           display: flex;
           align-items: center;
           justify-content: center;
           cursor: pointer;
-          transition: background 0.2s;
+          transition: all 0.2s;
           color: var(--primary-text-color);
-          opacity: 0.7;
+          backdrop-filter: blur(4px);
+          -webkit-backdrop-filter: blur(4px);
         }
         .hki-popup-close-btn:hover {
-          background: rgba(255, 255, 255, 0.1);
-          opacity: 1;
+          background: rgba(255, 255, 255, 0.2);
+          transform: scale(1.05);
         }
         .hki-popup-close-btn ha-icon {
-          --mdc-icon-size: 20px;
+          --mdc-icon-size: 18px;
         }
         .hki-popup-content {
           flex: 1;
@@ -660,13 +667,16 @@ class HkiNotificationCard extends LitElement {
           gap: 8px;
         }
         .hki-popup-empty {
-          text-align: center;
-          padding: 32px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          height: 100%;
           color: var(--secondary-text-color);
         }
         .hki-popup-footer {
           padding: 12px 16px;
           border-top: 1px solid rgba(255, 255, 255, 0.1);
+          margin-top: auto;
         }
         .hki-popup-clear-all-btn {
           width: 100%;
@@ -737,14 +747,24 @@ class HkiNotificationCard extends LitElement {
           animation: hki-spin 2s linear infinite;
         }
         @keyframes hki-spin { 100% { transform: rotate(360deg); } }
+        .hki-popup-pill .text-container {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+        }
         .hki-popup-pill .text {
           color: var(--primary-text-color);
           font-size: 14px;
           font-weight: 500;
-          flex: 1;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+        }
+        .hki-popup-pill .timestamp {
+            font-size: 11px;
+            opacity: 0.6;
+            margin-top: 2px;
         }
         .hki-popup-pill .action-indicator {
           position: absolute;
@@ -878,6 +898,10 @@ class HkiNotificationCard extends LitElement {
     const messages = this._getMessages().filter(m => m._real !== false);
     const msgIndex = messages.indexOf(msg);
     
+    // Timestamp Logic for Popup (Default True)
+    const showTime = this._config.show_popup_timestamp !== false;
+    const timeStr = showTime ? this._formatTime(msg) : "";
+
     return `
       <div class="hki-popup-pill-wrapper">
         <div class="hki-popup-pill-swipe-bg">
@@ -885,7 +909,10 @@ class HkiNotificationCard extends LitElement {
         </div>
         <div class="hki-popup-pill ${hasAction ? 'clickable' : ''}" data-msg-index="${msgIndex}">
           ${showIcon && !iconAfter ? `<ha-icon class="icon ${spinIcon ? 'spinning' : ''}" icon="${icon}"></ha-icon>` : ''}
-          <div class="text">${msg.message}</div>
+          <div class="text-container">
+            <div class="text">${msg.message}</div>
+            ${timeStr ? `<div class="timestamp">${timeStr}</div>` : ''}
+          </div>
           ${showIcon && iconAfter ? `<ha-icon class="icon ${spinIcon ? 'spinning' : ''}" icon="${icon}"></ha-icon>` : ''}
           ${hasAction ? `<ha-icon class="action-indicator" icon="mdi:chevron-right"></ha-icon>` : ''}
           ${isRealMsg ? `
@@ -1104,34 +1131,31 @@ class HkiNotificationCard extends LitElement {
     const content = this.shadowRoot?.querySelector('.marquee-content');
     if (!container || !content) return;
     
-    const messages = this._getMessages();
-    if (messages.length === 0) return;
+    const messageCount = this._getMessages().length;
+    if (messageCount === 0) return;
     
-    // Wait for pills to be rendered
+    if (this._isInBadgeSlot) {
+      if (!this._marqueeNeedsDuplicate) {
+        this._marqueeNeedsDuplicate = true;
+      }
+      return;
+    }
+    
     const pills = content.querySelectorAll('.pill');
-    if (pills.length === 0) {
-      setTimeout(() => this._checkMarqueeOverflow(), 100);
-      return;
+    if (pills.length === 0 || container.clientWidth === 0) return;
+    
+    let originalWidth = 0;
+    for (let i = 0; i < Math.min(pills.length, messageCount); i++) {
+      if (pills[i].offsetWidth === 0) return;
+      originalWidth += pills[i].offsetWidth;
     }
+    const gap = parseFloat(this._config.marquee_gap) || 16;
+    originalWidth += gap * messageCount;
     
-    // Use scrollWidth vs clientWidth - most reliable overflow detection
-    // If content is wider than container, we need to duplicate for seamless scrolling
-    const containerWidth = container.clientWidth;
-    const contentWidth = content.scrollWidth;
-    
-    // If container has no width yet (not laid out), retry
-    if (containerWidth === 0) {
-      setTimeout(() => this._checkMarqueeOverflow(), 100);
-      return;
-    }
-    
-    // Need duplicate if content overflows (with small buffer for rounding)
-    const needsDuplicate = contentWidth > (containerWidth + 5);
+    const needsDuplicate = originalWidth > container.clientWidth;
     
     if (needsDuplicate !== this._marqueeNeedsDuplicate) {
       this._marqueeNeedsDuplicate = needsDuplicate;
-      // Force re-render to apply the change
-      this.requestUpdate();
     }
   }
 
@@ -1231,13 +1255,20 @@ class HkiNotificationCard extends LitElement {
     const alignClass = isFullWidth ? `align-${msgAlignment}` : "";
     const noBgClass = !showBg ? "no-bg" : "";
     const headerPillClass = useHeaderPill ? "header-pill" : "";
+    
+    // Timestamp for List/Ticker (Default False)
+    const showTime = c.show_list_timestamp === true;
+    const timeStr = showTime ? this._formatTime(msg) : "";
 
     return html`
         <div class="pill ${animClass} ${widthClass} ${alignClass} ${noBgClass} ${headerPillClass} ${hasAction ? "clickable" : ""}" 
              style="${stylesStr}" 
              @click=${(e) => { e.stopPropagation(); this._handleClick(msg, e); }}>
           ${showIcon && !iconAfter ? html`<ha-icon class="icon ${spinIcon ? "spinning" : ""}" .icon=${icon}></ha-icon>` : ''}
-          <div class="text">${msg.message}</div>
+          <div class="text-wrapper">
+             <div class="text">${msg.message}</div>
+             ${timeStr ? html`<div class="timestamp">${timeStr}</div>` : ''}
+          </div>
           ${showIcon && iconAfter ? html`<ha-icon class="icon ${spinIcon ? "spinning" : ""}" .icon=${icon}></ha-icon>` : ''}
         </div>
     `;
@@ -1330,9 +1361,15 @@ class HkiNotificationCard extends LitElement {
     const realMessages = messages.filter(m => m._real !== false);
     const count = realMessages.length;
     
+    // Fixed height for stability
+    const popupStyle = `
+        height: 600px;
+        max-height: 80vh; 
+    `;
+
     return html`
       <div class="popup-backdrop" @click=${(e) => this._handlePopupBackdropClick(e)}>
-        <div class="popup-container">
+        <div class="popup-container" style="${popupStyle}">
           <div class="popup-header">
             <span class="popup-title">
               ${c.popup_title || 'Notifications'}
@@ -1421,6 +1458,10 @@ class HkiNotificationCard extends LitElement {
     const iconAfter = !!c.icon_after;
     const spinIcon = msg.icon_spin === true;
     const hasAction = !!msg.tap_action;
+    
+    // Timestamp Logic for Popup (Default True)
+    const showTime = c.show_popup_timestamp !== false;
+    const timeStr = showTime ? this._formatTime(msg) : "";
 
     return html`
       <div class="popup-pill-wrapper"
@@ -1436,7 +1477,10 @@ class HkiNotificationCard extends LitElement {
              style="${pillStyles}" 
              @click=${hasAction ? (e) => { e.stopPropagation(); this._handlePopupPillClick(msg); } : null}>
           ${showIcon && !iconAfter ? html`<ha-icon class="icon ${spinIcon ? "spinning" : ""}" .icon=${icon}></ha-icon>` : ''}
-          <div class="text">${msg.message}</div>
+          <div class="text-wrapper">
+             <div class="text">${msg.message}</div>
+             ${timeStr ? html`<div class="timestamp">${timeStr}</div>` : ''}
+          </div>
           ${showIcon && iconAfter ? html`<ha-icon class="icon ${spinIcon ? "spinning" : ""}" .icon=${icon}></ha-icon>` : ''}
           ${hasAction ? html`<ha-icon class="action-indicator" icon="mdi:chevron-right"></ha-icon>` : ''}
           ${isRealMsg ? html`
@@ -1736,7 +1780,14 @@ class HkiNotificationCard extends LitElement {
       .pill.full.align-left { justify-content: flex-start; }
       .pill.full.align-center { justify-content: center; }
       .pill.full.align-right { justify-content: flex-end; }
-      .pill.full .text { flex: 0 1 auto; }
+      
+      .text-wrapper {
+         display: flex;
+         flex-direction: column;
+         flex: 1 1 auto;
+         overflow: hidden;
+      }
+      
       .pill.clickable { cursor: pointer; }
       .pill.clickable:active { transform: scale(0.97); }
       
@@ -1796,7 +1847,15 @@ class HkiNotificationCard extends LitElement {
       .icon { color: var(--pill-icon-color); --mdc-icon-size: calc(var(--pill-font-size) + 5px); display: flex; flex-shrink: 0; }
       .icon.spinning { animation: spin 2s linear infinite; }
       @keyframes spin { 100% { transform: rotate(360deg); } }
-      .text { color: var(--pill-color); font-size: var(--pill-font-size); font-weight: var(--pill-font-weight); font-family: var(--pill-font-family); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; }
+      .text { color: var(--pill-color); font-size: var(--pill-font-size); font-weight: var(--pill-font-weight); font-family: var(--pill-font-family); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      
+      .timestamp {
+        font-size: 0.75em;
+        opacity: 0.7;
+        margin-top: 1px;
+        white-space: nowrap;
+        color: var(--pill-color);
+      }
       
       /* When background is hidden, add text shadow like header weather/datetime */
       .pill.no-bg .icon {
@@ -1854,7 +1913,6 @@ class HkiNotificationCard extends LitElement {
         border-radius: 16px;
         min-width: 320px;
         max-width: 90vw;
-        max-height: 80vh;
         display: flex;
         flex-direction: column;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
@@ -1894,25 +1952,26 @@ class HkiNotificationCard extends LitElement {
       }
       
       .popup-close-btn {
-        background: transparent;
-        border: none;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 50%;
-        width: 36px;
-        height: 36px;
+        width: 32px;
+        height: 32px;
         display: flex;
         align-items: center;
         justify-content: center;
         cursor: pointer;
-        transition: background 0.2s;
+        transition: all 0.2s;
         color: var(--primary-text-color);
-        opacity: 0.7;
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
       }
       .popup-close-btn:hover {
-        background: rgba(255, 255, 255, 0.1);
-        opacity: 1;
+        background: rgba(255, 255, 255, 0.2);
+        transform: scale(1.05);
       }
       .popup-close-btn ha-icon {
-        --mdc-icon-size: 20px;
+        --mdc-icon-size: 18px;
       }
       
       .popup-clear-btn {
@@ -1942,6 +2001,7 @@ class HkiNotificationCard extends LitElement {
       .popup-footer {
         padding: 12px 16px 16px;
         border-top: 1px solid rgba(255, 255, 255, 0.1);
+        margin-top: auto;
       }
       
       .popup-clear-all-btn {
@@ -1987,8 +2047,10 @@ class HkiNotificationCard extends LitElement {
       }
       
       .popup-empty {
-        text-align: center;
-        padding: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
         color: var(--secondary-text-color);
         font-size: 14px;
       }
@@ -2390,6 +2452,7 @@ class HkiNotificationCardEditor extends LitElement {
         <h3>Popup</h3>
         ${mode === 'button' ? html`
           ${this._renderInput("Popup Title", "popup_title", this._config.popup_title || "Notifications")}
+          ${this._renderSwitch("Show Timestamps", "show_popup_timestamp", this._config.show_popup_timestamp !== false)}
           ${this._renderSwitch("Confirm Tap Actions", "confirm_tap_action", this._config.confirm_tap_action)}
           <p class="helper-text">Button mode always opens the popup when clicked. When "Confirm Tap Actions" is enabled, a confirmation dialog appears before executing any tap action.</p>
         ` : html`
@@ -2398,6 +2461,10 @@ class HkiNotificationCardEditor extends LitElement {
           ${this._renderInput("Popup Title", "popup_title", this._config.popup_title || "Notifications")}
         </div>
         ${this._config.popup_enabled !== false ? html`
+          <div class="side-by-side">
+            ${this._renderSwitch("Popup Timestamps", "show_popup_timestamp", this._config.show_popup_timestamp !== false)}
+            ${this._renderSwitch("List Timestamps", "show_list_timestamp", this._config.show_list_timestamp)}
+          </div>
           ${this._renderSwitch("Tap Actions in Popup Only", "tap_action_popup_only", this._config.tap_action_popup_only)}
           ${!this._config.tap_action_popup_only ? html`
             ${this._renderSwitch("Confirm Tap Actions", "confirm_tap_action", this._config.confirm_tap_action)}

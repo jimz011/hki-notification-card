@@ -1,12 +1,9 @@
-/* HKI Notification Card
- * Version: 1.0.2
- * Fixes: show_empty default, popup styling, timestamps, stable popup size
- */
+// HKI Notification Card
 
 const CARD_NAME = "hki-notification-card";
 
 console.info(
-  '%c HKI-NOTIFICATION-CARD %c v1.0.2 ',
+  '%c HKI-NOTIFICATION-CARD %c v1.0.3 ',
   'color: white; background: #5a007a; font-weight: bold;',
   'color: #5a007a; background: white; font-weight: bold;'
 );
@@ -158,6 +155,8 @@ class HkiNotificationCard extends LitElement {
       // Timestamp options
       show_list_timestamp: false,
       show_popup_timestamp: true,
+      // Timestamp formatting: 'auto' (system locale), '12', '24'
+      time_format: "auto",
       // Button mode options
       button_icon: "mdi:bell",
       button_icon_color: "var(--primary-text-color)",
@@ -545,20 +544,36 @@ class HkiNotificationCard extends LitElement {
     const raw = msg.time || msg.timestamp || msg.created_at || msg.date;
     if (!raw) return "";
     
-    // Check if it's already a formatted time string (e.g., "14:30")
-    if (typeof raw === 'string' && raw.length < 9 && raw.includes(':')) {
-        return raw;
+    // If it's a plain HH:MM(:SS) string, build a Date for today so we can
+    // still apply locale + 12/24 overrides.
+    if (typeof raw === 'string') {
+      const m = raw.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/);
+      if (m) {
+        const d = new Date();
+        d.setHours(parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3] || '0', 10), 0);
+        return this._formatDateAsTime(d);
+      }
     }
     
     try {
         const date = new Date(raw);
         if (isNaN(date.getTime())) return String(raw);
-        
-        // Simple time format HH:MM
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return this._formatDateAsTime(date);
     } catch (e) {
         return "";
     }
+  }
+
+  _formatDateAsTime(date) {
+    const fmt = (this._config && this._config.time_format) ? String(this._config.time_format) : 'auto';
+    const opts = { hour: '2-digit', minute: '2-digit' };
+
+    // 'auto' -> system locale decides 12/24
+    if (fmt === '12') opts.hour12 = true;
+    if (fmt === '24') opts.hour12 = false;
+
+    // undefined locales => use system / browser locale
+    return date.toLocaleTimeString(undefined, opts);
   }
 
   _createPopupPortal() {
@@ -2453,6 +2468,11 @@ class HkiNotificationCardEditor extends LitElement {
         ${mode === 'button' ? html`
           ${this._renderInput("Popup Title", "popup_title", this._config.popup_title || "Notifications")}
           ${this._renderSwitch("Show Timestamps", "show_popup_timestamp", this._config.show_popup_timestamp !== false)}
+          <ha-select label="Time Format" .value=${this._config.time_format || "auto"} @selected=${(e) => this._valueChanged(e, "time_format")} @closed=${(e) => e.stopPropagation()} fixedMenuPosition>
+            <mwc-list-item value="auto">Auto (System Locale)</mwc-list-item>
+            <mwc-list-item value="24">24-hour</mwc-list-item>
+            <mwc-list-item value="12">12-hour</mwc-list-item>
+          </ha-select>
           ${this._renderSwitch("Confirm Tap Actions", "confirm_tap_action", this._config.confirm_tap_action)}
           <p class="helper-text">Button mode always opens the popup when clicked. When "Confirm Tap Actions" is enabled, a confirmation dialog appears before executing any tap action.</p>
         ` : html`
@@ -2465,6 +2485,11 @@ class HkiNotificationCardEditor extends LitElement {
             ${this._renderSwitch("Popup Timestamps", "show_popup_timestamp", this._config.show_popup_timestamp !== false)}
             ${this._renderSwitch("List Timestamps", "show_list_timestamp", this._config.show_list_timestamp)}
           </div>
+          <ha-select label="Time Format" .value=${this._config.time_format || "auto"} @selected=${(e) => this._valueChanged(e, "time_format")} @closed=${(e) => e.stopPropagation()} fixedMenuPosition>
+            <mwc-list-item value="auto">Auto (System Locale)</mwc-list-item>
+            <mwc-list-item value="24">24-hour</mwc-list-item>
+            <mwc-list-item value="12">12-hour</mwc-list-item>
+          </ha-select>
           ${this._renderSwitch("Tap Actions in Popup Only", "tap_action_popup_only", this._config.tap_action_popup_only)}
           ${!this._config.tap_action_popup_only ? html`
             ${this._renderSwitch("Confirm Tap Actions", "confirm_tap_action", this._config.confirm_tap_action)}

@@ -1,12 +1,9 @@
-/* HKI Notification Card
- * Version: 1.0.2
- * Fixes: show_empty default, popup styling, timestamps, stable popup size
- */
+// HKI Notification Card
 
 const CARD_NAME = "hki-notification-card";
 
 console.info(
-  '%c HKI-NOTIFICATION-CARD %c v1.0.2 ',
+  '%c HKI-NOTIFICATION-CARD %c v1.1.0 ',
   'color: white; background: #5a007a; font-weight: bold;',
   'color: #5a007a; background: white; font-weight: bold;'
 );
@@ -158,6 +155,8 @@ class HkiNotificationCard extends LitElement {
       // Timestamp options
       show_list_timestamp: false,
       show_popup_timestamp: true,
+      // Timestamp formatting: 'auto' (system locale), '12', '24'
+      time_format: "auto",
       // Button mode options
       button_icon: "mdi:bell",
       button_icon_color: "var(--primary-text-color)",
@@ -545,20 +544,36 @@ class HkiNotificationCard extends LitElement {
     const raw = msg.time || msg.timestamp || msg.created_at || msg.date;
     if (!raw) return "";
     
-    // Check if it's already a formatted time string (e.g., "14:30")
-    if (typeof raw === 'string' && raw.length < 9 && raw.includes(':')) {
-        return raw;
+    // If it's a plain HH:MM(:SS) string, build a Date for today so we can
+    // still apply locale + 12/24 overrides.
+    if (typeof raw === 'string') {
+      const m = raw.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/);
+      if (m) {
+        const d = new Date();
+        d.setHours(parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3] || '0', 10), 0);
+        return this._formatDateAsTime(d);
+      }
     }
     
     try {
         const date = new Date(raw);
         if (isNaN(date.getTime())) return String(raw);
-        
-        // Simple time format HH:MM
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return this._formatDateAsTime(date);
     } catch (e) {
         return "";
     }
+  }
+
+  _formatDateAsTime(date) {
+    const fmt = (this._config && this._config.time_format) ? String(this._config.time_format) : 'auto';
+    const opts = { hour: '2-digit', minute: '2-digit' };
+
+    // 'auto' -> system locale decides 12/24
+    if (fmt === '12') opts.hour12 = true;
+    if (fmt === '24') opts.hour12 = false;
+
+    // undefined locales => use system / browser locale
+    return date.toLocaleTimeString(undefined, opts);
   }
 
   _createPopupPortal() {
@@ -2335,43 +2350,112 @@ class HkiNotificationCardEditor extends LitElement {
 
     return html`
       <div class="card-config">
-        <ha-alert alert-type="info">
-          <strong>Documentation</strong><br><br>
-          This card requires the <a href="https://github.com/jimz011/hki-notify" target="_blank">HKI Notify</a> integration to function.<br><br>
-          This card can also be placed in the header/badges section!<br><br>
-          This card can be integrated into <a href="https://github.com/jimz011/hki-header-card" target="_blank">hki-header-card</a><br><br>
-          Please read the documentation at <a href="https://github.com/jimz011/hki-notification-card" target="_blank">hki-notification-card</a> to set up this card.<br><br>
-          <em>This card may contain bugs. Use at your own risk!</em>
-        </ha-alert>
         
-        ${this._renderEntityPicker("Notification Sensor", "entity", this._config.entity, "", ["sensor"])}
+        <details class="box-section" open>
+          <summary>Entity</summary>
+          <div class="box-content">
+            <ha-alert alert-type="info">
+              <strong>Documentation</strong><br><br>
+              This card requires the <a href="https://github.com/jimz011/hki-notify" target="_blank">HKI Notify</a> integration to function.<br><br>
+              This card can also be placed in the header/badges section!<br><br>
+              This card can be integrated into <a href="https://github.com/jimz011/hki-header-card" target="_blank">hki-header-card</a><br><br>
+              Please read the documentation at <a href="https://github.com/jimz011/hki-notification-card" target="_blank">hki-notification-card</a> to set up this card.<br><br>
+              <em>This card may contain bugs. Use at your own risk!</em>
+            </ha-alert>
+            
+            ${this._renderEntityPicker("Notification Sensor", "entity", this._config.entity, "", ["sensor"])}
+          </div>
+        </details>
 
-        <h3>Behavior</h3>
-
-        <ha-select label="Display Mode" .value=${mode} @selected=${(e) => this._modeChanged(e)} @closed=${(e) => e.stopPropagation()} fixedMenuPosition>
-           <mwc-list-item value="ticker">Ticker (Cycle One by One)</mwc-list-item>
-           <mwc-list-item value="marquee">Marquee (Scrollable List)</mwc-list-item>
-           <mwc-list-item value="list">List (Vertical Stack)</mwc-list-item>
-           <mwc-list-item value="button">Button (Icon Only)</mwc-list-item>
-        </ha-select>
-        
-        ${mode !== 'button' ? html`
-        <div class="side-by-side">
-             ${this._renderSwitch("Show When Empty", "show_empty", this._config.show_empty)}
-             ${this._config.show_empty ? this._renderInput("Empty Message", "empty_message", this._config.empty_message) : ''}
-        </div>
-        ` : ''}
-        
-        ${mode === 'marquee' ? html`
+        <details class="box-section">
+          <summary>Behavior</summary>
+          <div class="box-content">
+            <ha-select label="Display Mode" .value=${mode} @selected=${(e) => this._modeChanged(e)} @closed=${(e) => e.stopPropagation()} fixedMenuPosition>
+               <mwc-list-item value="ticker">Ticker (Cycle One by One)</mwc-list-item>
+               <mwc-list-item value="marquee">Marquee (Scrollable List)</mwc-list-item>
+               <mwc-list-item value="list">List (Vertical Stack)</mwc-list-item>
+               <mwc-list-item value="button">Button (Icon Only)</mwc-list-item>
+            </ha-select>
+            
+            ${mode !== 'button' ? html`
             <div class="side-by-side">
-                ${this._renderInput("Scroll Speed", "marquee_speed", this._config.marquee_speed, "number", "0.1")}
-                ${this._renderInput("Gap (px)", "marquee_gap", this._config.marquee_gap, "number")}
+                 ${this._renderSwitch("Show When Empty", "show_empty", this._config.show_empty)}
+                 ${this._config.show_empty ? this._renderInput("Empty Message", "empty_message", this._config.empty_message) : ''}
             </div>
-            ${this._renderSwitch("Auto Scroll", "auto_scroll", this._config.auto_scroll)}
-        ` : mode === 'list' ? html`
-            ${this._renderInput("Max Items Visible", "list_max_items", this._config.list_max_items, "number")}
-        ` : mode === 'button' ? html`
-            <h3>Button Style</h3>
+            ` : ''}
+            
+            ${mode === 'marquee' ? html`
+                <div class="side-by-side">
+                    ${this._renderInput("Scroll Speed", "marquee_speed", this._config.marquee_speed, "number", "0.1")}
+                    ${this._renderInput("Gap (px)", "marquee_gap", this._config.marquee_gap, "number")}
+                </div>
+                ${this._renderSwitch("Auto Scroll", "auto_scroll", this._config.auto_scroll)}
+            ` : mode === 'list' ? html`
+                ${this._renderInput("Max Items Visible", "list_max_items", this._config.list_max_items, "number")}
+            ` : mode === 'ticker' ? html`
+                <div class="side-by-side">
+                    ${this._renderInput("Interval (sec)", "interval", this._config.interval, "number", "0.1")}
+                    ${this._renderInput("Anim Speed (sec)", "animation_duration", this._config.animation_duration, "number", "0.1")}
+                </div>
+                ${this._renderSwitch("Auto Cycle Messages", "auto_cycle", this._config.auto_cycle)}
+                <div class="side-by-side">
+                    <ha-select label="Animation" .value=${this._config.animation || "slide"} @selected=${(e) => this._valueChanged(e, "animation")} @closed=${(e) => e.stopPropagation()} fixedMenuPosition>
+                      ${["slide","scale","fade","flip","glitch","wobble","bounce","rotate","zoom","blur","elastic","swing"].map(a => html`<mwc-list-item .value=${a}>${a.charAt(0).toUpperCase() + a.slice(1)}</mwc-list-item>`)}
+                    </ha-select>
+                    <ha-select label="Direction" .value=${this._config.direction || "right"} @selected=${(e) => this._valueChanged(e, "direction")} @closed=${(e) => e.stopPropagation()} fixedMenuPosition>
+                      ${["left","right","top","bottom"].map(d => html`<mwc-list-item .value=${d}>From ${d.charAt(0).toUpperCase() + d.slice(1)}</mwc-list-item>`)}
+                    </ha-select>
+                </div>
+            ` : ''}
+          </div>
+        </details>
+
+        <details class="box-section">
+          <summary>Popup Settings</summary>
+          <div class="box-content">
+            ${mode === 'button' ? html`
+              ${this._renderInput("Popup Title", "popup_title", this._config.popup_title || "Notifications")}
+              ${this._renderSwitch("Show Timestamps", "show_popup_timestamp", this._config.show_popup_timestamp !== false)}
+              <ha-select label="Time Format" .value=${this._config.time_format || "auto"} @selected=${(e) => this._valueChanged(e, "time_format")} @closed=${(e) => e.stopPropagation()} fixedMenuPosition>
+                <mwc-list-item value="auto">Auto (System Locale)</mwc-list-item>
+                <mwc-list-item value="24">24-hour</mwc-list-item>
+                <mwc-list-item value="12">12-hour</mwc-list-item>
+              </ha-select>
+              ${this._renderSwitch("Confirm Tap Actions", "confirm_tap_action", this._config.confirm_tap_action)}
+              <p class="helper-text">Button mode always opens the popup when clicked. When "Confirm Tap Actions" is enabled, a confirmation dialog appears before executing any tap action.</p>
+            ` : html`
+            <div class="side-by-side">
+              ${this._renderSwitch("Enable Popup", "popup_enabled", this._config.popup_enabled !== false)}
+              ${this._renderInput("Popup Title", "popup_title", this._config.popup_title || "Notifications")}
+            </div>
+            ${this._config.popup_enabled !== false ? html`
+              <div class="side-by-side">
+                ${this._renderSwitch("Popup Timestamps", "show_popup_timestamp", this._config.show_popup_timestamp !== false)}
+                ${this._renderSwitch("List Timestamps", "show_list_timestamp", this._config.show_list_timestamp)}
+              </div>
+              <ha-select label="Time Format" .value=${this._config.time_format || "auto"} @selected=${(e) => this._valueChanged(e, "time_format")} @closed=${(e) => e.stopPropagation()} fixedMenuPosition>
+                <mwc-list-item value="auto">Auto (System Locale)</mwc-list-item>
+                <mwc-list-item value="24">24-hour</mwc-list-item>
+                <mwc-list-item value="12">12-hour</mwc-list-item>
+              </ha-select>
+              ${this._renderSwitch("Tap Actions in Popup Only", "tap_action_popup_only", this._config.tap_action_popup_only)}
+              ${!this._config.tap_action_popup_only ? html`
+                ${this._renderSwitch("Confirm Tap Actions", "confirm_tap_action", this._config.confirm_tap_action)}
+                <p class="helper-text">When enabled, a confirmation dialog appears before executing any tap action on notifications.</p>
+              ` : html`
+                <p class="helper-text">When enabled, tapping always opens the popup first. Custom tap_actions from service calls will only work inside the popup.</p>
+              `}
+            ` : html`
+              <p class="helper-text">When enabled, tapping a notification opens a popup with all notifications and a clear button.</p>
+            `}
+            `}
+          </div>
+        </details>
+
+        ${mode === 'button' ? html`
+        <details class="box-section">
+          <summary>Button Style</summary>
+          <div class="box-content">
             <ha-select label="Alignment" .value=${this._config.alignment || "left"} @selected=${(e) => this._valueChanged(e, "alignment")} @closed=${(e) => e.stopPropagation()} fixedMenuPosition>
               ${["left","center","right"].map(a => html`<mwc-list-item .value=${a}>${a.charAt(0).toUpperCase() + a.slice(1)}</mwc-list-item>`)}
             </ha-select>
@@ -2390,14 +2474,14 @@ class HkiNotificationCardEditor extends LitElement {
             ` : ''}
             
             ${(this._config.button_label_position !== 'inside' || !this._config.button_label) ? html`
-              <h4>Icon Button</h4>
+              <div class="section">Icon Button</div>
               ${this._renderInput("Button Size (px)", "button_size", this._config.button_size || 48, "number")}
               <div class="side-by-side">
                 ${this._renderColorPicker("Icon Color", "button_icon_color", this._config.button_icon_color)}
                 ${this._renderColorPicker("Background", "button_bg_color", this._config.button_bg_color)}
               </div>
             ` : html`
-              <h4>Pill Button</h4>
+              <div class="section">Pill Button</div>
               ${this._renderInput("Font Size (px)", "button_pill_size", this._config.button_pill_size || 14, "number")}
               <div class="side-by-side">
                 ${this._renderColorPicker("Icon Color", "button_icon_color", this._config.button_icon_color)}
@@ -2418,7 +2502,7 @@ class HkiNotificationCardEditor extends LitElement {
               </div>
             `}
             
-            <h4>Badge</h4>
+            <div class="section">Badge</div>
             ${this._renderSwitch("Show Badge", "button_show_badge", this._config.button_show_badge !== false)}
             ${this._config.button_show_badge !== false ? html`
               ${(this._config.button_label_position === 'inside' && this._config.button_label) ? html`
@@ -2433,110 +2517,82 @@ class HkiNotificationCardEditor extends LitElement {
               </div>
               ${this._renderInput("Badge Size (0=auto)", "button_badge_size", this._config.button_badge_size ?? 0, "number")}
             ` : ''}
-        ` : html`
-            <div class="side-by-side">
-                ${this._renderInput("Interval (sec)", "interval", this._config.interval, "number", "0.1")}
-                ${this._renderInput("Anim Speed (sec)", "animation_duration", this._config.animation_duration, "number", "0.1")}
-            </div>
-            ${this._renderSwitch("Auto Cycle Messages", "auto_cycle", this._config.auto_cycle)}
-            <div class="side-by-side">
-                <ha-select label="Animation" .value=${this._config.animation || "slide"} @selected=${(e) => this._valueChanged(e, "animation")} @closed=${(e) => e.stopPropagation()} fixedMenuPosition>
-                  ${["slide","scale","fade","flip","glitch","wobble","bounce","rotate","zoom","blur","elastic","swing"].map(a => html`<mwc-list-item .value=${a}>${a.charAt(0).toUpperCase() + a.slice(1)}</mwc-list-item>`)}
-                </ha-select>
-                <ha-select label="Direction" .value=${this._config.direction || "right"} @selected=${(e) => this._valueChanged(e, "direction")} @closed=${(e) => e.stopPropagation()} fixedMenuPosition>
-                  ${["left","right","top","bottom"].map(d => html`<mwc-list-item .value=${d}>From ${d.charAt(0).toUpperCase() + d.slice(1)}</mwc-list-item>`)}
-                </ha-select>
-            </div>
-        `}
-
-        <h3>Popup</h3>
-        ${mode === 'button' ? html`
-          ${this._renderInput("Popup Title", "popup_title", this._config.popup_title || "Notifications")}
-          ${this._renderSwitch("Show Timestamps", "show_popup_timestamp", this._config.show_popup_timestamp !== false)}
-          ${this._renderSwitch("Confirm Tap Actions", "confirm_tap_action", this._config.confirm_tap_action)}
-          <p class="helper-text">Button mode always opens the popup when clicked. When "Confirm Tap Actions" is enabled, a confirmation dialog appears before executing any tap action.</p>
-        ` : html`
-        <div class="side-by-side">
-          ${this._renderSwitch("Enable Popup", "popup_enabled", this._config.popup_enabled !== false)}
-          ${this._renderInput("Popup Title", "popup_title", this._config.popup_title || "Notifications")}
-        </div>
-        ${this._config.popup_enabled !== false ? html`
-          <div class="side-by-side">
-            ${this._renderSwitch("Popup Timestamps", "show_popup_timestamp", this._config.show_popup_timestamp !== false)}
-            ${this._renderSwitch("List Timestamps", "show_list_timestamp", this._config.show_list_timestamp)}
           </div>
-          ${this._renderSwitch("Tap Actions in Popup Only", "tap_action_popup_only", this._config.tap_action_popup_only)}
-          ${!this._config.tap_action_popup_only ? html`
-            ${this._renderSwitch("Confirm Tap Actions", "confirm_tap_action", this._config.confirm_tap_action)}
-            <p class="helper-text">When enabled, a confirmation dialog appears before executing any tap action on notifications.</p>
-          ` : html`
-            <p class="helper-text">When enabled, tapping always opens the popup first. Custom tap_actions from service calls will only work inside the popup.</p>
-          `}
-        ` : html`
-          <p class="helper-text">When enabled, tapping a notification opens a popup with all notifications and a clear button.</p>
-        `}
-        `}
-        
-        <ha-alert alert-type="info">
-          These settings are defaults for the card. When creating notifications via the <code>hki_notify.create</code> service, you can override colors, fonts, and other styling per notification.
-        </ha-alert>
-        
+        </details>
+        ` : ''}
+
         ${mode !== 'button' ? html`
-        <h3>Header Card Integration</h3>
-        ${this._renderSwitch("Use Header Styling", "use_header_styling", this._config.use_header_styling)}
-        ${this._config.use_header_styling ? html`
-          <ha-alert alert-type="info">
-            When inside hki-header-card, font size, weight, color, and pill styling will be inherited from the header card's Info Display settings.
-          </ha-alert>
-        ` : ''}
+        <details class="box-section">
+          <summary>Header Card Integration</summary>
+          <div class="box-content">
+            ${this._renderSwitch("Use Header Styling", "use_header_styling", this._config.use_header_styling)}
+            ${this._config.use_header_styling ? html`
+              <ha-alert alert-type="info">
+                When inside hki-header-card, font size, weight, color, and pill styling will be inherited from the header card's Info Display settings.
+              </ha-alert>
+            ` : ''}
+          </div>
+        </details>
         
-        <h3>Appearance</h3>
-        <div class="side-by-side ${mode === 'marquee' ? '' : 'three-col'}">
-           ${this._renderSwitch("Show Icon", "show_icon", this._config.show_icon)}
-           ${this._renderSwitch("Icon After Text", "icon_after", this._config.icon_after)}
-           ${mode !== 'marquee' ? this._renderSwitch("Full Width", "full_width", this._config.full_width) : ''}
-        </div>
-
-        <ha-select label="Alignment" .value=${this._config.alignment || "left"} @selected=${(e) => this._valueChanged(e, "alignment")} @closed=${(e) => e.stopPropagation()} fixedMenuPosition>
-          ${["left","center","right"].map(a => html`<mwc-list-item .value=${a}>${a.charAt(0).toUpperCase() + a.slice(1)}</mwc-list-item>`)}
-        </ha-select>
-
         ${!this._config.use_header_styling ? html`
-        <div class="side-by-side">
-          ${this._renderColorPicker("Text Color", "text_color", this._config.text_color)}
-          ${this._renderColorPicker("Icon Color", "icon_color", this._config.icon_color)}
-        </div>
-        
-        ${this._renderSwitch("Show Background", "show_background", this._config.show_background !== false)}
-        ${this._config.show_background !== false ? html`
-          <div class="side-by-side">
-            ${this._renderColorPicker("Background", "bg_color", this._config.bg_color)}
-            ${this._renderInput("BG Opacity (0-1)", "bg_opacity", this._config.bg_opacity ?? 1, "number", "0.1")}
-          </div>
-          <div class="side-by-side">
-            ${this._renderColorPicker("Border Color", "border_color", this._config.border_color)}
-            ${this._renderInput("Border Width", "border_width", this._config.border_width, "number")}
-          </div>
-          ${this._renderInput("Box Shadow", "box_shadow", this._config.box_shadow)}
-          ${this._renderInput("Border Radius", "border_radius", this._config.border_radius, "number")}
-        ` : html`
-          ${this._renderInput("Border Radius", "border_radius", this._config.border_radius, "number")}
-        `}
+        <details class="box-section">
+          <summary>Appearance</summary>
+          <div class="box-content">
+            <ha-alert alert-type="info">
+              These settings are defaults for the card. When creating notifications via the <code>hki_notify.create</code> service, you can override colors, fonts, and other styling per notification.
+            </ha-alert>
+            
+            <div class="side-by-side ${mode === 'marquee' ? '' : 'three-col'}">
+               ${this._renderSwitch("Show Icon", "show_icon", this._config.show_icon)}
+               ${this._renderSwitch("Icon After Text", "icon_after", this._config.icon_after)}
+               ${mode !== 'marquee' ? this._renderSwitch("Full Width", "full_width", this._config.full_width) : ''}
+            </div>
 
-        <h3>Typography</h3>
-        <div class="side-by-side">
-            ${this._renderInput("Size (px)", "font_size", this._config.font_size, "number")}
-            <ha-select label="Weight" .value=${this._config.font_weight || "Semi Bold"} @selected=${(e) => this._valueChanged(e, "font_weight")} @closed=${(e) => e.stopPropagation()} fixedMenuPosition>
-              ${["Light","Regular","Medium","Semi Bold","Bold","Extra Bold"].map(w => html`<mwc-list-item .value=${w}>${w}</mwc-list-item>`)}
+            <ha-select label="Alignment" .value=${this._config.alignment || "left"} @selected=${(e) => this._valueChanged(e, "alignment")} @closed=${(e) => e.stopPropagation()} fixedMenuPosition>
+              ${["left","center","right"].map(a => html`<mwc-list-item .value=${a}>${a.charAt(0).toUpperCase() + a.slice(1)}</mwc-list-item>`)}
             </ha-select>
-        </div>
-        <ha-select label="Font Family" .value=${fontFamily} @selected=${(e) => this._valueChanged(e, "font_family")} @closed=${(e) => e.stopPropagation()} fixedMenuPosition>
-          ${FONTS.map(f => html`<mwc-list-item .value=${f}>${f === "Custom" ? "Custom..." : f.split(',')[0]}</mwc-list-item>`)}
-        </ha-select>
-        ${showCustomFont ? html`
-          ${this._renderInput("Custom Font Family", "custom_font_family", this._config.custom_font_family || "", "text")}
-          <p class="helper-text">Enter a CSS font-family value (e.g., "Comic Sans MS, cursive")</p>
-        ` : ''}
+
+            <div class="side-by-side">
+              ${this._renderColorPicker("Text Color", "text_color", this._config.text_color)}
+              ${this._renderColorPicker("Icon Color", "icon_color", this._config.icon_color)}
+            </div>
+            
+            ${this._renderSwitch("Show Background", "show_background", this._config.show_background !== false)}
+            ${this._config.show_background !== false ? html`
+              <div class="side-by-side">
+                ${this._renderColorPicker("Background", "bg_color", this._config.bg_color)}
+                ${this._renderInput("BG Opacity (0-1)", "bg_opacity", this._config.bg_opacity ?? 1, "number", "0.1")}
+              </div>
+              <div class="side-by-side">
+                ${this._renderColorPicker("Border Color", "border_color", this._config.border_color)}
+                ${this._renderInput("Border Width", "border_width", this._config.border_width, "number")}
+              </div>
+              ${this._renderInput("Box Shadow", "box_shadow", this._config.box_shadow)}
+              ${this._renderInput("Border Radius", "border_radius", this._config.border_radius, "number")}
+            ` : html`
+              ${this._renderInput("Border Radius", "border_radius", this._config.border_radius, "number")}
+            `}
+          </div>
+        </details>
+
+        <details class="box-section">
+          <summary>Typography</summary>
+          <div class="box-content">
+            <div class="side-by-side">
+                ${this._renderInput("Size (px)", "font_size", this._config.font_size, "number")}
+                <ha-select label="Weight" .value=${this._config.font_weight || "Semi Bold"} @selected=${(e) => this._valueChanged(e, "font_weight")} @closed=${(e) => e.stopPropagation()} fixedMenuPosition>
+                  ${["Light","Regular","Medium","Semi Bold","Bold","Extra Bold"].map(w => html`<mwc-list-item .value=${w}>${w}</mwc-list-item>`)}
+                </ha-select>
+            </div>
+            <ha-select label="Font Family" .value=${fontFamily} @selected=${(e) => this._valueChanged(e, "font_family")} @closed=${(e) => e.stopPropagation()} fixedMenuPosition>
+              ${FONTS.map(f => html`<mwc-list-item .value=${f}>${f === "Custom" ? "Custom..." : f.split(',')[0]}</mwc-list-item>`)}
+            </ha-select>
+            ${showCustomFont ? html`
+              ${this._renderInput("Custom Font Family", "custom_font_family", this._config.custom_font_family || "", "text")}
+              <p class="helper-text">Enter a CSS font-family value (e.g., "Comic Sans MS, cursive")</p>
+            ` : ''}
+          </div>
+        </details>
         ` : ''}
         ` : ''}
       </div>
@@ -2633,7 +2689,7 @@ class HkiNotificationCardEditor extends LitElement {
 
   static get styles() {
       return css`
-          .card-config { display: flex; flex-direction: column; gap: 16px; margin-bottom: 20px; }
+          .card-config { display: flex; flex-direction: column; gap: 12px; padding: 8px; }
           .side-by-side { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
           .three-col { grid-template-columns: 1fr 1fr 1fr; }
           ha-textfield, ha-select, ha-selector { width: 100%; display: block; }
@@ -2642,6 +2698,42 @@ class HkiNotificationCardEditor extends LitElement {
           .color-field { display: flex; flex-direction: column; gap: 4px; }
           .color-field label { font-size: 12px; color: var(--secondary-text-color); margin-left: 4px; }
           code { background: var(--code-background-color, rgba(0,0,0,0.1)); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+          .section { margin-top: 8px; font-weight: 600; }
+          
+          /* Collapsible Sections */
+          details.box-section {
+            background: var(--secondary-background-color);
+            border-radius: 4px;
+            margin-bottom: 8px;
+            overflow: hidden;
+            border: 1px solid var(--divider-color);
+          }
+          summary {
+            padding: 12px;
+            cursor: pointer;
+            font-weight: 600;
+            background: var(--primary-background-color);
+            border-bottom: 1px solid var(--divider-color);
+            list-style: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+          }
+          summary::-webkit-details-marker { display: none; }
+          summary::after {
+            content: '+'; 
+            font-weight: bold;
+            font-size: 1.2em;
+          }
+          details[open] summary::after {
+            content: '-';
+          }
+          .box-content {
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+          }
       `;
   }
 }

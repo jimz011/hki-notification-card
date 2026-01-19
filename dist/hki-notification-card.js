@@ -2363,7 +2363,7 @@ class HkiNotificationCardEditor extends LitElement {
               <em>This card may contain bugs. Use at your own risk!</em>
             </ha-alert>
             
-            ${this._renderEntityPicker("Notification Sensor", "entity", this._config.entity, "", ["sensor"])}
+            ${this._renderEntityPicker("Notification Sensor", "entity", this._config.entity, "Select an HKI Notify sensor", ["sensor"], "hki_notify")}
           </div>
         </details>
 
@@ -2606,8 +2606,11 @@ class HkiNotificationCardEditor extends LitElement {
     this._fireChanged(newConfig);
   }
 
-  _renderEntityPicker(label, field, value, helper = "", includeDomains = null) {
-      return html`<ha-selector .hass=${this.hass} .selector=${{ entity: { ...(includeDomains && { domain: includeDomains }) } }} .value=${value || ""} .label=${label} .helper=${helper} @value-changed=${(ev) => this._fireChanged({ ...this._config, [field]: ev.detail.value })}></ha-selector>`;
+  _renderEntityPicker(label, field, value, helper = "", includeDomains = null, integration = null) {
+      const selectorConfig = { entity: {} };
+      if (includeDomains) selectorConfig.entity.domain = includeDomains;
+      if (integration) selectorConfig.entity.integration = integration;
+      return html`<ha-selector .hass=${this.hass} .selector=${selectorConfig} .value=${value || ""} .label=${label} .helper=${helper} @value-changed=${(ev) => this._fireChanged({ ...this._config, [field]: ev.detail.value })}></ha-selector>`;
   }
 
   _renderInput(label, field, value, type = "text", step = null) {

@@ -3,7 +3,7 @@
 const CARD_NAME = "hki-notification-card";
 
 console.info(
-  '%c HKI-NOTIFICATION-CARD %c v1.2.0 ',
+  '%c HKI-NOTIFICATION-CARD %c v1.2.1 ',
   'color: white; background: #5a007a; font-weight: bold;',
   'color: #5a007a; background: white; font-weight: bold;'
 );
@@ -475,9 +475,9 @@ class HkiNotificationCard extends LitElement {
     }
     
     if (msg.tap_action) {
-      const needsConfirm = msg.confirm !== undefined ? msg.confirm : this._config.confirm_tap_action;
+      const needsConfirm = this._needsConfirmation(msg);
       if (needsConfirm) {
-        this._confirmationPending = msg;
+        this._showConfirmation(msg);
         return;
       }
       this._executeTapAction(msg.tap_action);
@@ -549,6 +549,173 @@ class HkiNotificationCard extends LitElement {
       this._popupPortal = null;
     }
   }
+
+  // ===== Confirmation (tap_action) overlay =====
+  _removeConfirmationPortal() {
+    if (this._confirmationPortal) {
+      this._confirmationPortal.remove();
+      this._confirmationPortal = null;
+    }
+  }
+
+  _needsConfirmation(msg) {
+    // Message-level override (supports booleans and "true"/"false" strings)
+    if (msg && msg.confirm !== undefined) {
+      if (typeof msg.confirm === 'string') return msg.confirm.toLowerCase() === 'true';
+      return !!msg.confirm;
+    }
+
+    // Home Assistant standard: tap_action.confirmation (bool or object)
+    const conf = msg?.tap_action?.confirmation;
+    if (conf !== undefined) {
+      if (typeof conf === 'boolean') return conf;
+      if (typeof conf === 'string') return conf.toLowerCase() === 'true';
+      if (typeof conf === 'object') return true;
+      return !!conf;
+    }
+
+    // Fallback to card-level default
+    return !!this._config.confirm_tap_action;
+  }
+
+  _getConfirmationText(msg) {
+    // Prefer explicit message confirm_message
+    if (msg?.confirm_message) return String(msg.confirm_message);
+
+    const conf = msg?.tap_action?.confirmation;
+    // HA confirmation object often uses "text"
+    if (conf && typeof conf === 'object') {
+      if (conf.text) return String(conf.text);
+      if (conf.message) return String(conf.message);
+    }
+
+    // Fallback: a readable action description
+    return this._getActionDescription(msg?.tap_action);
+  }
+
+  _showConfirmation(msg, { closePopupFirst = false } = {}) {
+    if (!msg?.tap_action) return;
+
+    if (closePopupFirst) this._closePopup();
+
+    this._confirmationPending = msg;
+    this._removeConfirmationPortal();
+
+    const icon = msg.icon || "mdi:bell";
+    const actionDesc = this._getConfirmationText(msg);
+
+    const portal = document.createElement("div");
+    portal.className = "hki-confirmation-portal";
+    portal.innerHTML = `
+      <style>
+        .hki-confirmation-portal {
+          position: fixed;
+          inset: 0;
+          z-index: 10000;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(0,0,0,0.7);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+        }
+        .hki-confirmation-container{
+          width: min(92vw, 420px);
+          background: rgba(28,28,28,0.65);
+          border-radius: 16px;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+          padding: 18px 18px 14px;
+          color: var(--primary-text-color);
+          border: 1px solid rgba(255,255,255,0.08);
+        }
+        .hki-confirmation-top{
+          display:flex;
+          align-items:center;
+          gap:12px;
+          margin-bottom: 10px;
+        }
+        .hki-confirmation-top ha-icon{
+          --mdc-icon-size: 28px;
+          opacity: 0.95;
+        }
+        .hki-confirmation-message{
+          font-size: 15px;
+          font-weight: 600;
+          line-height: 1.25;
+          margin: 0;
+          word-break: break-word;
+        }
+        .hki-confirmation-action{
+          margin-top: 8px;
+          font-size: 13px;
+          opacity: 0.8;
+          line-height: 1.3;
+          word-break: break-word;
+        }
+        .hki-confirmation-buttons{
+          display:flex;
+          gap:10px;
+          margin-top: 14px;
+          justify-content: flex-end;
+        }
+        .hki-confirmation-btn{
+          border: none;
+          border-radius: 10px;
+          padding: 10px 14px;
+          cursor: pointer;
+          font-weight: 600;
+          color: var(--primary-text-color);
+        }
+        .hki-confirmation-btn.cancel{
+          background: rgba(255,255,255,0.08);
+        }
+        .hki-confirmation-btn.confirm{
+          background: var(--primary-color);
+          color: var(--text-primary-color, #fff);
+        }
+      </style>
+      <div class="hki-confirmation-container" role="dialog" aria-modal="true">
+        <div class="hki-confirmation-top">
+          <ha-icon icon="${icon}"></ha-icon>
+          <p class="hki-confirmation-message">${String(msg.message ?? "Confirm action")}</p>
+        </div>
+        <div class="hki-confirmation-action">${actionDesc}</div>
+        <div class="hki-confirmation-buttons">
+          <button class="hki-confirmation-btn cancel" data-action="cancel">Cancel</button>
+          <button class="hki-confirmation-btn confirm" data-action="confirm">Confirm</button>
+        </div>
+      </div>
+    `;
+
+    portal.addEventListener("click", (e) => {
+      // backdrop click cancels
+      if (e.target === portal) {
+        this._confirmationPending = null;
+        this._removeConfirmationPortal();
+      }
+    });
+
+    portal.querySelector('[data-action="cancel"]')?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this._confirmationPending = null;
+      this._removeConfirmationPortal();
+    });
+
+    portal.querySelector('[data-action="confirm"]')?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const pending = this._confirmationPending;
+      this._confirmationPending = null;
+      this._removeConfirmationPortal();
+      if (pending?.tap_action) {
+        this._executeTapAction(pending.tap_action);
+      }
+    });
+
+    document.body.appendChild(portal);
+    this._confirmationPortal = portal;
+  }
+
+
 
   // Helper to format timestamps
   _formatTime(msg) {
@@ -681,8 +848,6 @@ const portal = document.createElement('div');
           align-items: center;
           justify-content: center;
           z-index: 9999;
-          backdrop-filter: blur(4px);
-          -webkit-backdrop-filter: blur(4px);
         }
         .hki-popup-container {
           ${this._getPopupCardStyle()}
@@ -737,8 +902,6 @@ const portal = document.createElement('div');
           cursor: pointer;
           transition: all 0.2s;
           color: var(--primary-text-color);
-          backdrop-filter: blur(4px);
-          -webkit-backdrop-filter: blur(4px);
         }
         .hki-popup-close-btn:hover {
           background: rgba(255, 255, 255, 0.2);
@@ -960,11 +1123,9 @@ const portal = document.createElement('div');
         if (msgIndex !== undefined) {
           const msg = realMessages[parseInt(msgIndex)];
           if (msg?.tap_action) {
-            const needsConfirm = msg.confirm !== undefined ? msg.confirm : this._config.confirm_tap_action;
+            const needsConfirm = this._needsConfirmation(msg);
             if (needsConfirm) {
-              this._confirmationPending = msg;
-              this._closePopup();
-              this.requestUpdate();
+              this._showConfirmation(msg, { closePopupFirst: true });
             } else {
               this._executeTapAction(msg.tap_action);
             }
@@ -983,6 +1144,7 @@ const portal = document.createElement('div');
     const iconAfter = !!this._config.icon_after;
     const spinIcon = msg.icon_spin === true;
     const hasAction = !!msg.tap_action;
+    const tapActionInPopupOnly = !!this._config.tap_action_popup_only;
     const isRealMsg = msg._real !== false;
     const messages = this._getMessages().filter(m => m._real !== false);
     const msgIndex = messages.indexOf(msg);
@@ -1042,12 +1204,11 @@ const portal = document.createElement('div');
   _handlePopupPillClick(msg) {
     if (!msg.tap_action) return;
     
-    const needsConfirm = msg.confirm !== undefined ? msg.confirm : this._config.confirm_tap_action;
-    
-    if (needsConfirm) {
-      this._confirmationPending = msg;
-      return;
-    }
+    const needsConfirm = this._needsConfirmation(msg);
+      if (needsConfirm) {
+        this._showConfirmation(msg);
+        return;
+      }
     
     this._executeTapAction(msg.tap_action);
   }
@@ -1544,7 +1705,8 @@ const portal = document.createElement('div');
     const showIcon = c.show_icon !== false;
     const iconAfter = !!c.icon_after;
     const spinIcon = msg.icon_spin === true;
-    const hasAction = !!msg.tap_action;
+    const hasAction = !!msg.tap_action && !this._config.tap_action_popup_only;
+    const tapActionInPopupOnly = !!this._config.tap_action_popup_only;
     
     // Timestamp Logic for Popup (Default True)
     const showTime = c.show_popup_timestamp !== false;

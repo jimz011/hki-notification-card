@@ -3,7 +3,7 @@
 const CARD_NAME = "hki-notification-card";
 
 console.info(
-  '%c HKI-NOTIFICATION-CARD %c v1.1.1 ',
+  '%c HKI-NOTIFICATION-CARD %c v1.2.0 ',
   'color: white; background: #5a007a; font-weight: bold;',
   'color: #5a007a; background: white; font-weight: bold;'
 );
@@ -152,6 +152,17 @@ class HkiNotificationCard extends LitElement {
       popup_enabled: true,
       tap_action_popup_only: false,
       confirm_tap_action: false,
+      // Popup Backdrop & Card Styling (match hki-button-card defaults)
+      popup_blur_enabled: true,
+      popup_blur_amount: 10,
+      popup_card_blur_enabled: true,
+      popup_card_blur_amount: 40,
+      popup_card_opacity: 0.4,
+      popup_border_radius: 16,
+      popup_width: "auto",
+      popup_width_custom: 400,
+      popup_height: "auto",
+      popup_height_custom: 600,
       // Timestamp options
       show_list_timestamp: false,
       show_popup_timestamp: true,
@@ -576,6 +587,73 @@ class HkiNotificationCard extends LitElement {
     return date.toLocaleTimeString(undefined, opts);
   }
 
+
+  _getPopupPortalStyle() {
+    const blurEnabled = this._config.popup_blur_enabled !== false;
+    const blurAmount = this._config.popup_blur_amount !== undefined ? Number(this._config.popup_blur_amount) : 10;
+    const blur = blurEnabled && blurAmount > 0
+      ? `backdrop-filter: blur(${blurAmount}px); -webkit-backdrop-filter: blur(${blurAmount}px); will-change: backdrop-filter;`
+      : '';
+    // Match hki-button-card default backdrop
+    return `background: rgba(0,0,0,0.7); ${blur}`;
+  }
+
+  _getPopupCardStyle() {
+    const cardBlurEnabled = this._config.popup_card_blur_enabled !== false;
+    const cardBlurAmount = this._config.popup_card_blur_amount !== undefined ? Number(this._config.popup_card_blur_amount) : 40;
+    let cardOpacity = this._config.popup_card_opacity !== undefined ? Number(this._config.popup_card_opacity) : 0.4;
+
+    // If blur is enabled but user sets opacity to 1, keep some transparency so glass effect is visible
+    if (cardBlurEnabled && cardOpacity === 1) {
+      cardOpacity = 0.7;
+    }
+
+    let bg;
+    if (cardOpacity < 1 || cardBlurEnabled) {
+      bg = `background: rgba(28, 28, 28, ${cardOpacity});`;
+    } else {
+      bg = `background: var(--card-background-color, #1c1c1c);`;
+    }
+
+    const blur = cardBlurEnabled && cardBlurAmount > 0
+      ? `backdrop-filter: blur(${cardBlurAmount}px); -webkit-backdrop-filter: blur(${cardBlurAmount}px);`
+      : '';
+
+    return bg + (blur ? ' ' + blur : '');
+  }
+
+  _getPopupDimensions() {
+    const widthCfg = this._config.popup_width || 'auto';
+    const heightCfg = this._config.popup_height || 'auto';
+
+    let width = '95vw; max-width: 500px';
+    let height = '90vh; max-height: 800px';
+
+    if (widthCfg === 'auto') {
+      width = '95vw; max-width: 500px';
+    } else if (widthCfg === 'custom') {
+      const customWidth = this._config.popup_width_custom ?? 400;
+      width = `${customWidth}px`;
+    } else if (widthCfg === 'default') {
+      width = '90%; max-width: 400px';
+    } else if (!isNaN(Number(widthCfg))) {
+      width = `${Number(widthCfg)}px`;
+    }
+
+    if (heightCfg === 'auto') {
+      height = '90vh; max-height: 800px';
+    } else if (heightCfg === 'custom') {
+      const customHeight = this._config.popup_height_custom ?? 600;
+      height = `${customHeight}px`;
+    } else if (heightCfg === 'default') {
+      height = '600px';
+    } else if (!isNaN(Number(heightCfg))) {
+      height = `${Number(heightCfg)}px`;
+    }
+
+    return { width, height };
+  }
+
   _createPopupPortal() {
     this._removePopupPortal();
     
@@ -584,14 +662,10 @@ class HkiNotificationCard extends LitElement {
     const count = realMessages.length;
     const c = this._config;
     
-    const portal = document.createElement('div');
+        const popupBorderRadius = c.popup_border_radius ?? 16;
+    const { width: popupWidth, height: popupHeight } = this._getPopupDimensions();
+const portal = document.createElement('div');
     portal.className = 'hki-notification-popup-portal';
-    
-    // Fixed height popup for stability
-    const popupStyle = `
-        height: 600px;
-        max-height: 80vh; 
-    `;
 
     portal.innerHTML = `
       <style>
@@ -601,7 +675,8 @@ class HkiNotificationCard extends LitElement {
           left: 0;
           right: 0;
           bottom: 0;
-          background: rgba(0, 0, 0, 0.6);
+          ${this._getPopupPortalStyle()}
+          
           display: flex;
           align-items: center;
           justify-content: center;
@@ -610,14 +685,13 @@ class HkiNotificationCard extends LitElement {
           -webkit-backdrop-filter: blur(4px);
         }
         .hki-popup-container {
-          background: var(--card-background-color, #1c1c1c);
-          border-radius: 16px;
-          min-width: 320px;
-          max-width: 90vw;
-          ${popupStyle}
+          ${this._getPopupCardStyle()}
+          border-radius: ${popupBorderRadius}px;
+          width: ${popupWidth};
+          height: ${popupHeight};
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
           display: flex;
           flex-direction: column;
-          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
           overflow: hidden;
           transition: height 0.2s;
         }
@@ -1375,16 +1449,14 @@ class HkiNotificationCard extends LitElement {
     const c = this._config;
     const realMessages = messages.filter(m => m._real !== false);
     const count = realMessages.length;
-    
-    // Fixed height for stability
-    const popupStyle = `
-        height: 600px;
-        max-height: 80vh; 
-    `;
+    const popupBorderRadius = c.popup_border_radius ?? 16;
+    const { width: popupWidth, height: popupHeight } = this._getPopupDimensions();
+    const backdropStyle = this._getPopupPortalStyle();
+    const containerStyle = `${this._getPopupCardStyle()} border-radius: ${popupBorderRadius}px; width: ${popupWidth}; height: ${popupHeight}; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); overflow: hidden; display: flex; flex-direction: column;`;
 
     return html`
-      <div class="popup-backdrop" @click=${(e) => this._handlePopupBackdropClick(e)}>
-        <div class="popup-container" style="${popupStyle}">
+      <div class="popup-backdrop" style="${backdropStyle}" @click=${(e) => this._handlePopupBackdropClick(e)}>
+        <div class="popup-container" style="${containerStyle}">
           <div class="popup-header">
             <span class="popup-title">
               ${c.popup_title || 'Notifications'}
@@ -1914,24 +1986,17 @@ class HkiNotificationCard extends LitElement {
         left: 0;
         right: 0;
         bottom: 0;
-        background: rgba(0, 0, 0, 0.6);
+        /* Styling provided via inline styles from config */
         display: flex;
         align-items: center;
         justify-content: center;
         z-index: 999;
-        backdrop-filter: blur(4px);
-        -webkit-backdrop-filter: blur(4px);
       }
       
       .popup-container {
-        background: var(--card-background-color, #1c1c1c);
-        border-radius: 16px;
+        /* Styling provided via inline styles from config */
         min-width: 320px;
         max-width: 90vw;
-        display: flex;
-        flex-direction: column;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-        overflow: hidden;
       }
       
       .popup-header {
@@ -2420,7 +2485,75 @@ class HkiNotificationCardEditor extends LitElement {
                 <mwc-list-item value="auto">Auto (System Locale)</mwc-list-item>
                 <mwc-list-item value="24">24-hour</mwc-list-item>
                 <mwc-list-item value="12">12-hour</mwc-list-item>
-              </ha-select>
+                            </ha-select>
+
+              <div class="separator"></div>
+              <strong>Popup Container</strong>
+              ${this._renderInput("Border Radius (px)", "popup_border_radius", this._config.popup_border_radius ?? 16, "number")}
+              <div class="side-by-side">
+                <ha-select
+                  label="Width"
+                  .value=${this._config.popup_width || 'auto'}
+                  @selected=${(ev) => this._valueChanged(ev, "popup_width")}
+                  @closed=${(e) => e.stopPropagation()}
+                  @click=${(e) => e.stopPropagation()}
+                >
+                  <mwc-list-item value="auto">Auto (Responsive) - Default</mwc-list-item>
+                  <mwc-list-item value="default">Default (400px)</mwc-list-item>
+                  <mwc-list-item value="custom">Custom</mwc-list-item>
+                </ha-select>
+                ${this._config.popup_width === 'custom'
+                  ? this._renderInput("Custom Width (px)", "popup_width_custom", this._config.popup_width_custom ?? 400, "number")
+                  : html`<div></div>`}
+              </div>
+
+              <div class="side-by-side">
+                <ha-select
+                  label="Height"
+                  .value=${this._config.popup_height || 'auto'}
+                  @selected=${(ev) => this._valueChanged(ev, "popup_height")}
+                  @closed=${(e) => e.stopPropagation()}
+                  @click=${(e) => e.stopPropagation()}
+                >
+                  <mwc-list-item value="auto">Auto (Responsive) - Default</mwc-list-item>
+                  <mwc-list-item value="default">Default (600px)</mwc-list-item>
+                  <mwc-list-item value="custom">Custom</mwc-list-item>
+                </ha-select>
+                ${this._config.popup_height === 'custom'
+                  ? this._renderInput("Custom Height (px)", "popup_height_custom", this._config.popup_height_custom ?? 600, "number")
+                  : html`<div></div>`}
+              </div>
+
+              <p class="helper-text" style="margin-top: 10px;">Background Blur (Backdrop)</p>
+              ${this._renderSwitch("Enable Background Blur", "popup_blur_enabled", this._config.popup_blur_enabled !== false)}
+              <ha-textfield
+                label="Blur Amount (px)"
+                type="number"
+                .value=${this._config.popup_blur_amount ?? 10}
+                @input=${(ev) => this._valueChanged(ev, "popup_blur_amount")}
+                .disabled=${this._config.popup_blur_enabled === false}
+              ></ha-textfield>
+
+              <p class="helper-text" style="margin-top: 10px;">Card Glass Effect</p>
+              ${this._renderSwitch("Enable Card Blur", "popup_card_blur_enabled", this._config.popup_card_blur_enabled !== false)}
+              <div class="side-by-side">
+                <ha-textfield
+                  label="Card Blur (px)"
+                  type="number"
+                  .value=${this._config.popup_card_blur_amount ?? 40}
+                  @input=${(ev) => this._valueChanged(ev, "popup_card_blur_amount")}
+                  .disabled=${this._config.popup_card_blur_enabled === false}
+                ></ha-textfield>
+                <ha-textfield
+                  label="Card Opacity (0-1)"
+                  type="number"
+                  step="0.05"
+                  .value=${this._config.popup_card_opacity ?? 0.4}
+                  @input=${(ev) => this._valueChanged(ev, "popup_card_opacity")}
+                ></ha-textfield>
+              </div>
+
+              <div class="separator"></div>
               ${this._renderSwitch("Confirm Tap Actions", "confirm_tap_action", this._config.confirm_tap_action)}
               <p class="helper-text">Button mode always opens the popup when clicked. When "Confirm Tap Actions" is enabled, a confirmation dialog appears before executing any tap action.</p>
             ` : html`
@@ -2437,7 +2570,75 @@ class HkiNotificationCardEditor extends LitElement {
                 <mwc-list-item value="auto">Auto (System Locale)</mwc-list-item>
                 <mwc-list-item value="24">24-hour</mwc-list-item>
                 <mwc-list-item value="12">12-hour</mwc-list-item>
-              </ha-select>
+                            </ha-select>
+
+              <div class="separator"></div>
+              <strong>Popup Container</strong>
+              ${this._renderInput("Border Radius (px)", "popup_border_radius", this._config.popup_border_radius ?? 16, "number")}
+              <div class="side-by-side">
+                <ha-select
+                  label="Width"
+                  .value=${this._config.popup_width || 'auto'}
+                  @selected=${(ev) => this._valueChanged(ev, "popup_width")}
+                  @closed=${(e) => e.stopPropagation()}
+                  @click=${(e) => e.stopPropagation()}
+                >
+                  <mwc-list-item value="auto">Auto (Responsive) - Default</mwc-list-item>
+                  <mwc-list-item value="default">Default (400px)</mwc-list-item>
+                  <mwc-list-item value="custom">Custom</mwc-list-item>
+                </ha-select>
+                ${this._config.popup_width === 'custom'
+                  ? this._renderInput("Custom Width (px)", "popup_width_custom", this._config.popup_width_custom ?? 400, "number")
+                  : html`<div></div>`}
+              </div>
+
+              <div class="side-by-side">
+                <ha-select
+                  label="Height"
+                  .value=${this._config.popup_height || 'auto'}
+                  @selected=${(ev) => this._valueChanged(ev, "popup_height")}
+                  @closed=${(e) => e.stopPropagation()}
+                  @click=${(e) => e.stopPropagation()}
+                >
+                  <mwc-list-item value="auto">Auto (Responsive) - Default</mwc-list-item>
+                  <mwc-list-item value="default">Default (600px)</mwc-list-item>
+                  <mwc-list-item value="custom">Custom</mwc-list-item>
+                </ha-select>
+                ${this._config.popup_height === 'custom'
+                  ? this._renderInput("Custom Height (px)", "popup_height_custom", this._config.popup_height_custom ?? 600, "number")
+                  : html`<div></div>`}
+              </div>
+
+              <p class="helper-text" style="margin-top: 10px;">Background Blur (Backdrop)</p>
+              ${this._renderSwitch("Enable Background Blur", "popup_blur_enabled", this._config.popup_blur_enabled !== false)}
+              <ha-textfield
+                label="Blur Amount (px)"
+                type="number"
+                .value=${this._config.popup_blur_amount ?? 10}
+                @input=${(ev) => this._valueChanged(ev, "popup_blur_amount")}
+                .disabled=${this._config.popup_blur_enabled === false}
+              ></ha-textfield>
+
+              <p class="helper-text" style="margin-top: 10px;">Card Glass Effect</p>
+              ${this._renderSwitch("Enable Card Blur", "popup_card_blur_enabled", this._config.popup_card_blur_enabled !== false)}
+              <div class="side-by-side">
+                <ha-textfield
+                  label="Card Blur (px)"
+                  type="number"
+                  .value=${this._config.popup_card_blur_amount ?? 40}
+                  @input=${(ev) => this._valueChanged(ev, "popup_card_blur_amount")}
+                  .disabled=${this._config.popup_card_blur_enabled === false}
+                ></ha-textfield>
+                <ha-textfield
+                  label="Card Opacity (0-1)"
+                  type="number"
+                  step="0.05"
+                  .value=${this._config.popup_card_opacity ?? 0.4}
+                  @input=${(ev) => this._valueChanged(ev, "popup_card_opacity")}
+                ></ha-textfield>
+              </div>
+
+              <div class="separator"></div>
               ${this._renderSwitch("Tap Actions in Popup Only", "tap_action_popup_only", this._config.tap_action_popup_only)}
               ${!this._config.tap_action_popup_only ? html`
                 ${this._renderSwitch("Confirm Tap Actions", "confirm_tap_action", this._config.confirm_tap_action)}

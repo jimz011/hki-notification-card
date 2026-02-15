@@ -3,7 +3,7 @@
 const CARD_NAME = "hki-notification-card";
 
 console.info(
-  '%c HKI-NOTIFICATION-CARD %c v1.2.1 ',
+  '%c HKI-NOTIFICATION-CARD %c v1.2.2 ',
   'color: white; background: #5a007a; font-weight: bold;',
   'color: #5a007a; background: white; font-weight: bold;'
 );
@@ -2802,13 +2802,13 @@ class HkiNotificationCardEditor extends LitElement {
 
               <div class="separator"></div>
               ${this._renderSwitch("Tap Actions in Popup Only", "tap_action_popup_only", this._config.tap_action_popup_only)}
+              ${this._renderSwitch("Confirm Tap Actions", "confirm_tap_action", this._config.confirm_tap_action)}
               ${!this._config.tap_action_popup_only ? html`
-                ${this._renderSwitch("Confirm Tap Actions", "confirm_tap_action", this._config.confirm_tap_action)}
                 <p class="helper-text">When enabled, a confirmation dialog appears before executing any tap action on notifications.</p>
               ` : html`
-                <p class="helper-text">When enabled, tapping always opens the popup first. Custom tap_actions from service calls will only work inside the popup.</p>
+                <p class="helper-text">When enabled, tapping always opens the popup first. Tap actions are available inside the popup. "Confirm Tap Actions" will also apply to actions inside the popup.</p>
               `}
-            ` : html`
+              ` : html`
               <p class="helper-text">When enabled, tapping a notification opens a popup with all notifications and a clear button.</p>
             `}
             `}
